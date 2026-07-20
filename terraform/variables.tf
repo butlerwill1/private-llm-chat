@@ -26,6 +26,26 @@ variable "environment" {
   }
 }
 
+variable "owner" {
+  description = "Person or team accountable for the resources and their AWS spend."
+  type        = string
+
+  validation {
+    condition     = trimspace(var.owner) != "" && length(var.owner) <= 256
+    error_message = "owner must contain a non-empty tag value no longer than 256 characters."
+  }
+}
+
+variable "cost_center" {
+  description = "Billing code or reporting bucket used for AWS cost allocation."
+  type        = string
+
+  validation {
+    condition     = trimspace(var.cost_center) != "" && length(var.cost_center) <= 256
+    error_message = "cost_center must contain a non-empty tag value no longer than 256 characters."
+  }
+}
+
 variable "vpc_cidr" {
   description = "Private address range for the application VPC."
   type        = string
@@ -95,8 +115,15 @@ variable "model_port" {
 }
 
 variable "tags" {
-  description = "Additional tags applied to all resources. Do not put secrets in tags."
+  description = "Additional cost/reporting tags applied to supported resources. Reserved standard keys cannot be overridden."
   type        = map(string)
   default     = {}
-}
 
+  validation {
+    condition = length(setintersection(
+      toset(keys(var.tags)),
+      toset(["Project", "Environment", "ManagedBy", "Owner", "CostCenter", "Repository"])
+    )) == 0
+    error_message = "tags must not override Project, Environment, ManagedBy, Owner, CostCenter, or Repository."
+  }
+}

@@ -97,13 +97,22 @@ resource "aws_instance" "gpu" {
     volume_type = "gp3"
   }
 
+  # Provider defaults add the standard cost tags; this block adds GPU-specific
+  # operational dimensions without duplicating the provider tag map.
   tags = {
     Name         = "${var.name}-gpu"
     Role         = "private-inference"
     ControlScope = var.name
+    AutoStop     = "true"
   }
 
-  volume_tags = { Name = "${var.name}-gpu-root" }
+  # Root EBS volumes are created indirectly by aws_instance, so pass the cost
+  # allocation tags explicitly rather than relying only on provider defaults.
+  volume_tags = merge(var.tags, {
+    Name     = "${var.name}-gpu-root"
+    Role     = "model-storage"
+    AutoStop = "not-applicable"
+  })
 
   lifecycle {
     precondition {
@@ -112,4 +121,3 @@ resource "aws_instance" "gpu" {
     }
   }
 }
-

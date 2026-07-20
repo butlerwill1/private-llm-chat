@@ -28,3 +28,7 @@ output "application_security_group_id" {
   value       = module.network.application_security_group_id
 }
 
+output "cost_allocation_tags" {
+  description = "Protected tags applied to all AWS resources that support tagging."
+  value       = local.common_tags
+}

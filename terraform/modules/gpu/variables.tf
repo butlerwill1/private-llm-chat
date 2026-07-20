@@ -54,3 +54,7 @@ variable "model_port" {
   description = "Private inference port."
 }
 
+variable "tags" {
+  type        = map(string)
+  description = "Standard cost-allocation tags inherited by the GPU and its EBS volume."
+}

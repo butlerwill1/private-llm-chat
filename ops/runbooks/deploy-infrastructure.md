@@ -17,6 +17,10 @@
 4. Apply the reviewed file with `terraform apply tfplan`.
 5. Record the deployment reference and outputs in the approved operations system.
 6. Verify S3 Block Public Access, KMS rotation, CloudTrail coverage and VPC routes.
+7. Inspect the `cost_allocation_tags` output and confirm tagged resources contain
+   `Project`, `Environment`, `ManagedBy`, `Owner`, `CostCenter` and `Repository`.
+8. After the tag keys appear in AWS Billing, activate them as user-defined cost
+   allocation tags so they are available in Cost Explorer and billing reports.
 
 Do not apply a plan after its source, variables or provider selections change.
 Create and review a new plan instead. Production changes require peer approval.
@@ -27,4 +31,3 @@ Prefer a forward fix. If rollback is required, check whether schema or stored-da
 changes make the earlier version unsafe. Never destroy the conversation bucket or
 KMS key as an incidental rollback step. Their Terraform protections and delayed
 key deletion are intentional.
-

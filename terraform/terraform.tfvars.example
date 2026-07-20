@@ -1,6 +1,8 @@
 aws_region   = "eu-west-2"
 project_name = "private-llm-chat"
 environment  = "dev"
+owner        = "butlerwill1"
+cost_center  = "personal-ai"
 
 # GPU resources are deliberately opt-in. Use a hardened pre-baked AMI because
 # the isolated subnet has no general internet egress.
@@ -9,7 +11,5 @@ gpu_ami_id       = null
 gpu_instance_type = "g6.xlarge"
 
 tags = {
-  Owner      = "platform-team"
-  CostCentre = "personal"
+  Workload = "private-chat"
 }
-

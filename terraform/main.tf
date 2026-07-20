@@ -1,5 +1,16 @@
 locals {
   name = "${var.project_name}-${var.environment}"
+
+  # These protected tags form the shared cost-allocation vocabulary used by the
+  # neighbouring projects. Custom tags may add dimensions but cannot replace them.
+  common_tags = merge(var.tags, {
+    Project     = var.project_name
+    Environment = var.environment
+    ManagedBy   = "terraform"
+    Owner       = var.owner
+    CostCenter  = var.cost_center
+    Repository  = "butlerwill1/private-llm-chat"
+  })
 }
 
 data "aws_caller_identity" "current" {}
@@ -44,4 +55,5 @@ module "gpu" {
   s3_prefix_list_id = module.network.s3_prefix_list_id
   application_sg_id = module.network.application_security_group_id
   model_port        = var.model_port
+  tags              = local.common_tags
 }

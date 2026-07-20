@@ -15,6 +15,7 @@ This repository implements the initial engineering foundation from the [project 
 - AES-256-GCM envelope-encryption primitives and safe in-memory development adapters.
 - A React and TypeScript chat interface with accessible, responsive interactions.
 - Terraform for private networking, KMS, encrypted conversation storage and an optional default-off GPU host.
+- Provider-wide AWS cost tags for project, environment, owner, cost centre and repository reporting.
 - Automated unit, contract, lint, type, build and Terraform checks.
 - Architecture decisions, a threat model and operational runbooks.
 
@@ -112,6 +113,10 @@ terraform plan -out=tfplan
 ```
 
 Do not apply this example to an AWS account until its IAM, state backend, authentication path and cost controls have been reviewed for that account.
+
+Terraform requires `owner` and `cost_center` values and applies protected cost-allocation
+tags to supported AWS resources automatically. After deployment, activate those tag keys
+in AWS Billing and Cost Management before expecting them in Cost Explorer.
 
 ## Quality checks
 
