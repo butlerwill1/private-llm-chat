@@ -42,3 +42,6 @@ Thumbs.db
 .local/
 tmp/
 
+# Model weights must be staged in private object storage, never committed.
+*.gguf
+*.safetensors

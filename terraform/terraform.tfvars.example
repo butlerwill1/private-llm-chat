@@ -10,6 +10,33 @@ enable_gpu       = false
 gpu_ami_id       = null
 gpu_instance_type = "g6.xlarge"
 
+# The AMI factory is also opt-in. Use an AWS-owned GPU DLAMI pinned by AMI ID
+# and the release-published Ollama SHA-256.
+# build_image_now starts chargeable GPU instances; normally trigger the pipeline.
+enable_image_builder       = false
+build_image_now            = false
+image_builder_parent_image = null
+ollama_version             = null
+ollama_sha256              = null
+
+# After a successful pipeline run, set this to the output parameter path to make
+# runtime deployments resolve the tested AMI without selecting by mutable tags.
+gpu_ami_ssm_parameter_name = null
+
+# Create the private model landing bucket first. This stores model files but does
+# not download one or start GPU compute. Leave the existing-bucket override null.
+enable_model_artifact_bucket             = false
+model_artifact_noncurrent_retention_days = 90
+
+# After running scripts/stage-model.ps1, set the key, digest and name it prints.
+# The bucket can stay null when enable_model_artifact_bucket is true; otherwise
+# set it to an existing reviewed private bucket. The build role can read only the
+# exact object and the component verifies its checksum before importing it.
+image_builder_model_s3_bucket = null
+image_builder_model_s3_key    = null
+image_builder_model_sha256    = null
+image_builder_model_name      = null
+
 tags = {
   Workload = "private-chat"
 }
