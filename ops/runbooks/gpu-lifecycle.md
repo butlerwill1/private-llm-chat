@@ -1,5 +1,9 @@
 # Operate the private GPU host
 
+For the laptop-hosted web application and an on-demand SSM tunnel or shell, use
+the [personal session runbook](personal-session.md). This document covers the
+underlying host lifecycle and AMI replacement policy.
+
 ## Start and readiness
 
 1. Start only the instance ARN returned by Terraform, using the dedicated GPU

@@ -23,6 +23,11 @@ output "gpu_private_ip" {
   value       = var.enable_gpu ? module.gpu[0].private_ip : null
 }
 
+output "gpu_instance_id" {
+  description = "Private GPU instance ID used by the personal session script, or null when disabled."
+  value       = var.enable_gpu ? module.gpu[0].instance_id : null
+}
+
 output "application_security_group_id" {
   description = "Attach this security group to application compute that calls the GPU."
   value       = module.network.application_security_group_id

@@ -1,17 +1,25 @@
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
+import boto3
 import httpx
 from fastapi import FastAPI
 
+from private_chat.adapters.aws_kms import KmsDataKeyProvider
 from private_chat.adapters.encryption import AesGcmEnvelopeEncryptor, LocalAesDataKeyProvider
 from private_chat.adapters.memory_repository import InMemoryConversationRepository
 from private_chat.adapters.openrouter import OpenRouterConfiguration, OpenRouterModelClient
+from private_chat.adapters.s3_repository import S3ConversationRepository
 from private_chat.adapters.self_hosted import SelfHostedConfiguration, SelfHostedModelClient
 from private_chat.api.routes import router
+from private_chat.application.conversations import ConversationService
 from private_chat.application.send_message import SendMessage
-from private_chat.config import ModelBackend, Settings
-from private_chat.ports.interfaces import ModelClient
+from private_chat.config import ModelBackend, Settings, StorageBackend
+from private_chat.ports.interfaces import (
+    ConversationRepository,
+    DataKeyProvider,
+    ModelClient,
+)
 
 
 def create_app(
@@ -64,11 +72,27 @@ def create_app(
                 ),
                 client,
             )
-    repository = InMemoryConversationRepository()
-    encryptor = AesGcmEnvelopeEncryptor(
-        LocalAesDataKeyProvider(settings.local_master_key())
+    repository: ConversationRepository
+    data_keys: DataKeyProvider
+    if settings.storage_backend is StorageBackend.S3:
+        if settings.conversation_bucket is None or settings.kms_key_id is None:
+            raise RuntimeError("Validated AWS storage settings are unexpectedly missing")
+        repository = S3ConversationRepository(
+            boto3.client("s3", region_name=settings.aws_region),
+            settings.conversation_bucket,
+            settings.kms_key_id,
+        )
+        data_keys = KmsDataKeyProvider(
+            boto3.client("kms", region_name=settings.aws_region), settings.kms_key_id
+        )
+    else:
+        repository = InMemoryConversationRepository()
+        data_keys = LocalAesDataKeyProvider(settings.local_master_key())
+
+    encryptor = AesGcmEnvelopeEncryptor(data_keys)
+    app.state.send_message = SendMessage(
+        repository, encryptor, model_client, settings.model_name
     )
-    app.state.send_message = SendMessage(repository, encryptor, model_client)
-    app.state.repository = repository
+    app.state.conversations = ConversationService(repository, encryptor)
     app.include_router(router, prefix="/v1")
     return app

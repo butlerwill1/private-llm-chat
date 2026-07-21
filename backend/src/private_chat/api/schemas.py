@@ -10,6 +10,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from private_chat.application.conversations import ConversationView
 from private_chat.domain.models import ChatMessage, Role
 
 
@@ -17,10 +18,9 @@ class SendMessageRequest(BaseModel):
     """Validated JSON body accepted by the send-message endpoint."""
 
     # Reject misspelled or unexpected fields rather than silently ignoring them.
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
     # Limits provide an early guard against empty input and unbounded request bodies.
     content: str = Field(min_length=1, max_length=32_000)
-    model: str = Field(min_length=1, max_length=200)
 
 
 class MessageResponse(BaseModel):
@@ -40,6 +40,24 @@ class MessageResponse(BaseModel):
             role=message.role,
             content=message.content,
             created_at=message.created_at,
+        )
+
+
+class ConversationResponse(BaseModel):
+    """Complete conversation contract consumed by the local React application."""
+
+    id: UUID
+    title: str
+    created_at: datetime
+    messages: tuple[MessageResponse, ...]
+
+    @classmethod
+    def from_view(cls, view: ConversationView) -> "ConversationResponse":
+        return cls(
+            id=view.conversation.id,
+            title=view.conversation.title,
+            created_at=view.conversation.created_at,
+            messages=tuple(MessageResponse.from_domain(message) for message in view.messages),
         )
 
 

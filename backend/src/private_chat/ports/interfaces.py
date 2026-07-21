@@ -10,6 +10,7 @@ from typing import Protocol
 from uuid import UUID
 
 from private_chat.domain.models import (
+    Conversation,
     EncryptedPayload,
     ModelRequest,
     ModelResponse,
@@ -29,6 +30,21 @@ class ModelClient(Protocol):
 class ConversationRepository(Protocol):
     """Encrypted conversation persistence required by application use cases."""
 
+    async def create_conversation(self, conversation: Conversation) -> None:
+        """Create an empty conversation, rejecting an existing identifier."""
+
+        ...
+
+    async def list_conversations(self) -> Sequence[Conversation]:
+        """Return conversation metadata newest first."""
+
+        ...
+
+    async def get_conversation(self, conversation_id: UUID) -> Conversation | None:
+        """Return conversation metadata or ``None`` when it does not exist."""
+
+        ...
+
     async def list_messages(self, conversation_id: UUID) -> Sequence[StoredMessage]:
         """Return stored messages in their authoritative conversation order."""
 
@@ -38,6 +54,11 @@ class ConversationRepository(Protocol):
         self, conversation_id: UUID, user: StoredMessage, assistant: StoredMessage
     ) -> None:
         """Persist both sides of a completed turn atomically."""
+
+        ...
+
+    async def delete_conversation(self, conversation_id: UUID) -> bool:
+        """Delete a conversation and transcript, returning whether it existed."""
 
         ...
 

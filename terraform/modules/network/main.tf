@@ -4,6 +4,7 @@ data "aws_availability_zones" "available" {
 
 locals {
   availability_zones = slice(data.aws_availability_zones.available.names, 0, 2)
+  ssm_subnet_ids     = slice(values(aws_subnet.private)[*].id, 0, var.ssm_endpoint_subnet_count)
 }
 
 resource "aws_vpc" "this" {
@@ -85,13 +86,12 @@ resource "aws_vpc_endpoint" "s3" {
 }
 
 resource "aws_vpc_endpoint" "interface" {
-  for_each = toset(["ssm", "ssmmessages", "ec2messages"])
+  for_each = var.enable_ssm_endpoints ? var.ssm_endpoint_services : toset([])
 
   vpc_id              = aws_vpc.this.id
   service_name        = "com.amazonaws.${var.aws_region}.${each.value}"
   vpc_endpoint_type   = "Interface"
   private_dns_enabled = true
-  subnet_ids          = values(aws_subnet.private)[*].id
+  subnet_ids          = local.ssm_subnet_ids
   security_group_ids  = [aws_security_group.endpoints.id]
 }
-

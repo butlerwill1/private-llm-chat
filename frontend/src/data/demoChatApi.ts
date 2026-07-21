@@ -59,9 +59,7 @@ export class DemoChatApi implements ChatApi {
       throw new Error('The selected conversation could not be found.')
     }
 
-    const response = request.model === 'private'
-      ? 'Thank you for sharing that. What feels most important about it?'
-      : 'I understand. What would be a useful next step to explore?'
+    const response = 'Thank you for sharing that. What feels most important about it?'
     const updated: Conversation = {
       ...current,
       messages: [
@@ -74,5 +72,10 @@ export class DemoChatApi implements ChatApi {
       conversation.id === updated.id ? updated : conversation,
     )
     return Promise.resolve(updated)
+  }
+
+  async deleteConversation(conversationId: string): Promise<void> {
+    this.conversations = this.conversations.filter(({ id }) => id !== conversationId)
+    return Promise.resolve()
   }
 }

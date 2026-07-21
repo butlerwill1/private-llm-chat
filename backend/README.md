@@ -7,8 +7,9 @@ can be tested without a network or framework.
 
 ## Security posture
 
-- Message content is encrypted before it reaches the repository. The included in-memory
-  repository and local key wrapper are development/test adapters, not production persistence.
+- Message content is encrypted before it reaches either repository. The in-memory
+  repository and local key wrapper are development adapters; personal mode can
+  instead use conditional S3 writes and AWS KMS data keys.
 - Each message gets a random AES-256-GCM data key. Authenticated context binds ciphertext to
   its conversation and message identifiers.
 - OpenRouter calls always request zero-data-retention, deny data collection, disable provider
@@ -21,9 +22,10 @@ can be tested without a network or framework.
 - Configuration fails at startup when the encryption key or selected provider credentials are
   absent. There is no plaintext fallback.
 
-Authentication, durable encrypted persistence and an AWS KMS `DataKeyProvider` are deliberately
-deployment work, not implied by these local adapters. Do not expose this starter to a network
-until authentication and authorisation are added at the API edge.
+The backend includes opt-in S3 persistence and an AWS KMS `DataKeyProvider` for
+personal mode. Authentication remains deployment work: bind this process only to
+`127.0.0.1` and do not expose it to a network until authentication and
+authorisation are added at the API edge.
 
 ## Run locally
 
@@ -48,6 +50,12 @@ uvicorn private_chat.main:app --reload
 
 The API documentation is at `http://127.0.0.1:8000/docs` in development only.
 
+For durable personal storage, set `CHAT_STORAGE_BACKEND=s3` together with the
+Terraform conversation bucket, KMS key and region outputs. The active local AWS
+identity must carry the output application data policy. Each message remains
+application-encrypted before S3 receives it; bucket SSE-KMS is an additional
+storage control.
+
 ## Quality checks
 
 ```powershell
@@ -61,11 +69,8 @@ should implement `ModelClient` and pass the same contract rather than changing t
 
 ## Production adapter checklist
 
-1. Implement `DataKeyProvider` with AWS KMS `GenerateDataKey` and `Decrypt`, including an
-   encryption context.
-2. Replace the in-memory repository with a durable adapter that stores ciphertext and supports
-   atomic turn writes.
-3. Put authentication and per-user conversation authorisation in front of every conversation
+1. Put authentication and per-user conversation authorisation in front of every conversation
    route.
-4. Inject secrets from an AWS secrets service; do not place them in images or Terraform state.
-5. Disable or redact request-body logging in API Gateway, load balancers, tracing and error tools.
+2. Integration-test S3 conditional writes and KMS encryption contexts in the deployment account.
+3. Inject secrets from an AWS secrets service; do not place them in images or Terraform state.
+4. Disable or redact request-body logging in API Gateway, load balancers, tracing and error tools.

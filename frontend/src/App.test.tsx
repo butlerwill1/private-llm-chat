@@ -1,10 +1,13 @@
 import { cleanup, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { App } from './App'
 import { DemoChatApi } from './data/demoChatApi'
 
-afterEach(cleanup)
+afterEach(() => {
+  cleanup()
+  vi.restoreAllMocks()
+})
 
 async function renderApp() {
   const api = new DemoChatApi()
@@ -38,5 +41,12 @@ describe('Private Chat', () => {
     const { user } = await renderApp()
     await user.click(screen.getByText('Encrypted'))
     expect(screen.getByText('Your conversation is private')).toBeVisible()
+  })
+
+  it('deletes the selected conversation after confirmation', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const { user } = await renderApp()
+    await user.click(screen.getByRole('button', { name: 'Delete conversation' }))
+    expect(screen.queryByRole('heading', { name: 'Sunday reflection' })).not.toBeInTheDocument()
   })
 })

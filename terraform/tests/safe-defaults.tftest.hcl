@@ -24,6 +24,11 @@ run "safe_cost_defaults" {
   }
 
   assert {
+    condition     = var.enable_ssm_endpoints == false && length(module.network.ssm_endpoint_ids) == 0
+    error_message = "Hourly-billed SSM interface endpoints must remain disabled by default."
+  }
+
+  assert {
     condition     = var.enable_image_builder == false && var.build_image_now == false
     error_message = "The chargeable GPU image builder and immediate build must remain opt-in."
   }

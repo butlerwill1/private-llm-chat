@@ -17,3 +17,8 @@ output "s3_prefix_list_id" {
   value       = aws_vpc_endpoint.s3.prefix_list_id
   description = "AWS-managed S3 prefix list used for restricted egress."
 }
+
+output "ssm_endpoint_ids" {
+  value       = values(aws_vpc_endpoint.interface)[*].id
+  description = "Hourly-billed Systems Manager endpoint IDs; empty when personal sessions are disabled."
+}

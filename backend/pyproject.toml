@@ -8,6 +8,7 @@ version = "0.1.0"
 description = "Privacy-first chat API with replaceable inference backends"
 requires-python = ">=3.12"
 dependencies = [
+  "boto3>=1.35,<2",
   "cryptography>=43,<46",
   "fastapi>=0.115,<1",
   "httpx>=0.27,<1",
@@ -18,6 +19,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
+  "boto3-stubs[kms,s3]>=1.35,<2",
   "mypy>=1.11,<2",
   "pytest>=8.3,<9",
   "pytest-asyncio>=0.24,<1",

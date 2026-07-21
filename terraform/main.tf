@@ -46,9 +46,12 @@ data "aws_ssm_parameter" "approved_gpu_ami" {
 module "network" {
   source = "./modules/network"
 
-  name       = local.name
-  vpc_cidr   = var.vpc_cidr
-  aws_region = var.aws_region
+  name                      = local.name
+  vpc_cidr                  = var.vpc_cidr
+  aws_region                = var.aws_region
+  enable_ssm_endpoints      = var.enable_ssm_endpoints
+  ssm_endpoint_services     = var.ssm_endpoint_services
+  ssm_endpoint_subnet_count = var.ssm_endpoint_subnet_count
 }
 
 module "data" {
@@ -76,6 +79,8 @@ module "iam" {
   bucket_arn       = module.data.bucket_arn
   kms_key_arn      = module.data.kms_key_arn
   gpu_instance_arn = var.enable_gpu ? module.gpu[0].instance_arn : null
+  aws_region       = var.aws_region
+  account_id       = data.aws_caller_identity.current.account_id
 }
 
 module "image_builder" {
@@ -105,16 +110,17 @@ module "gpu" {
   count  = var.enable_gpu ? 1 : 0
   source = "./modules/gpu"
 
-  name              = local.name
-  ami_id            = local.selected_gpu_ami_id
-  instance_type     = var.gpu_instance_type
-  root_volume_gib   = var.gpu_root_volume_gib
-  kms_key_arn       = module.data.kms_key_arn
-  subnet_id         = module.network.private_subnet_ids[0]
-  vpc_id            = module.network.vpc_id
-  vpc_cidr          = var.vpc_cidr
-  s3_prefix_list_id = module.network.s3_prefix_list_id
-  application_sg_id = module.network.application_security_group_id
-  model_port        = var.model_port
-  tags              = local.common_tags
+  name                = local.name
+  ami_id              = local.selected_gpu_ami_id
+  instance_type       = var.gpu_instance_type
+  root_volume_gib     = var.gpu_root_volume_gib
+  max_runtime_minutes = var.gpu_max_runtime_minutes
+  kms_key_arn         = module.data.kms_key_arn
+  subnet_id           = module.network.private_subnet_ids[0]
+  vpc_id              = module.network.vpc_id
+  vpc_cidr            = var.vpc_cidr
+  s3_prefix_list_id   = module.network.s3_prefix_list_id
+  application_sg_id   = module.network.application_security_group_id
+  model_port          = var.model_port
+  tags                = local.common_tags
 }

@@ -12,16 +12,14 @@ export interface Conversation {
   readonly messages: readonly ChatMessage[]
 }
 
-export type ModelChoice = 'private' | 'openrouter'
-
 export interface SendMessageRequest {
   readonly conversationId: string
   readonly body: string
-  readonly model: ModelChoice
 }
 
 export interface ChatApi {
   listConversations(): Promise<readonly Conversation[]>
   createConversation(): Promise<Conversation>
   sendMessage(request: SendMessageRequest): Promise<Conversation>
+  deleteConversation(conversationId: string): Promise<void>
 }
