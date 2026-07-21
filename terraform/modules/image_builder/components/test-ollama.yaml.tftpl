@@ -5,6 +5,8 @@ phases:
   - name: test
     steps:
       - name: TestNvidiaRuntime
+        # Fail the AMI build unless EC2 exposes at least one usable NVIDIA GPU.
+        # The second command records hardware and driver provenance in build logs.
         action: ExecuteBash
         timeoutSeconds: 120
         onFailure: Abort
@@ -13,6 +15,8 @@ phases:
             - test "$(nvidia-smi --list-gpus | grep --count '^GPU ')" -ge 1
             - nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv,noheader
       - name: TestOllamaService
+        # Confirm systemd will start Ollama after future boots, then allow up to
+        # two minutes for its loopback health endpoint to become available.
         action: ExecuteBash
         timeoutSeconds: 300
         onFailure: Abort
@@ -26,9 +30,13 @@ phases:
                 sleep 2
               done
               systemctl is-active --quiet ollama.service
+              # Exact version matching prevents an unreviewed Ollama upgrade from
+              # being distributed merely because some executable is installed.
               /usr/local/bin/ollama --version | grep --fixed-strings '${ollama_version}'
               curl --fail --silent http://127.0.0.1:11434/api/tags >/dev/null
       - name: TestGpuInference
+        # Service-only images legitimately omit a model. When a verified model is
+        # configured, however, the build must prove an end-to-end GPU generation.
         action: ExecuteBash
         timeoutSeconds: 1800
         onFailure: Abort
@@ -41,10 +49,14 @@ phases:
                 exit 0
               fi
               /usr/local/bin/ollama show '${model_name}' >/dev/null
+              # Use the loopback API used by the runtime adapter and allow enough
+              # time for a large model's first load without permitting a hung build.
               response=$(curl --fail --silent --show-error --max-time 1200 \
                 http://127.0.0.1:11434/api/generate \
                 --header 'Content-Type: application/json' \
                 --data-binary '{"model":"${model_name}","prompt":"Reply with the word ready.","stream":false}')
               printf '%s' "$response" | grep --extended-regexp --quiet '"done"[[:space:]]*:[[:space:]]*true'
+              # Ollama's process report must attribute a non-zero percentage to
+              # the GPU; CPU-only success would defeat the purpose of this AMI.
               /usr/local/bin/ollama ps
               /usr/local/bin/ollama ps | grep --extended-regexp --quiet '[1-9][0-9]*% GPU|100% GPU'
