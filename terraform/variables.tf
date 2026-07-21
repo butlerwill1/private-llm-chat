@@ -86,6 +86,137 @@ variable "gpu_ami_id" {
   }
 }
 
+variable "gpu_ami_ssm_parameter_name" {
+  description = "Optional Image Builder output parameter to resolve as the approved runtime AMI. The parameter must already exist."
+  type        = string
+  default     = null
+  nullable    = true
+
+  validation {
+    condition     = var.gpu_ami_ssm_parameter_name == null || can(regex("^/[A-Za-z0-9_./-]+$", var.gpu_ami_ssm_parameter_name))
+    error_message = "gpu_ami_ssm_parameter_name must be null or an absolute SSM parameter path."
+  }
+}
+
+variable "enable_image_builder" {
+  description = "Create an EC2 Image Builder pipeline for the private inference AMI. Disabled by default."
+  type        = bool
+  default     = false
+}
+
+variable "build_image_now" {
+  description = "Start a chargeable GPU image build during terraform apply. Prefer explicit pipeline execution in CI."
+  type        = bool
+  default     = false
+
+  validation {
+    condition     = !var.build_image_now || var.enable_image_builder
+    error_message = "build_image_now requires enable_image_builder to be true."
+  }
+}
+
+variable "image_builder_parent_image" {
+  description = "Pinned AWS-owned GPU DLAMI ID; required when Image Builder is enabled."
+  type        = string
+  default     = null
+  nullable    = true
+
+  validation {
+    condition = (
+      !var.enable_image_builder ||
+      (var.image_builder_parent_image != null && can(regex("^ami-[0-9a-f]+$", var.image_builder_parent_image)))
+    )
+    error_message = "Set image_builder_parent_image to a pinned AWS GPU DLAMI when Image Builder is enabled."
+  }
+}
+
+variable "ollama_version" {
+  description = "Exact Ollama semantic version installed into the AMI. Required when Image Builder is enabled."
+  type        = string
+  default     = null
+  nullable    = true
+
+  validation {
+    condition     = !var.enable_image_builder || (var.ollama_version != null && can(regex("^[0-9]+\\.[0-9]+\\.[0-9]+$", var.ollama_version)))
+    error_message = "Set ollama_version to an exact three-part version when Image Builder is enabled."
+  }
+}
+
+variable "ollama_sha256" {
+  description = "SHA-256 digest for the pinned Ollama Linux amd64 tarball. Required when Image Builder is enabled."
+  type        = string
+  default     = null
+  nullable    = true
+
+  validation {
+    condition     = !var.enable_image_builder || (var.ollama_sha256 != null && can(regex("^[0-9a-fA-F]{64}$", var.ollama_sha256)))
+    error_message = "Set ollama_sha256 to the verified release digest when Image Builder is enabled."
+  }
+}
+
+variable "image_builder_component_version" {
+  description = "AWSTOE component version. Bump whenever component templates change."
+  type        = string
+  default     = "1.0.0"
+}
+
+variable "image_builder_recipe_version" {
+  description = "Image recipe version. Bump whenever recipe inputs change."
+  type        = string
+  default     = "1.0.0"
+}
+
+variable "image_builder_instance_types" {
+  description = "GPU-capable instance types available for Image Builder build and test stages."
+  type        = list(string)
+  default     = ["g6.xlarge"]
+}
+
+variable "enable_model_artifact_bucket" {
+  description = "Create a private, versioned, KMS-encrypted bucket for verified model files. Disabled by default to avoid storage cost."
+  type        = bool
+  default     = false
+}
+
+variable "model_artifact_noncurrent_retention_days" {
+  description = "Days to retain older versions of staged model files before S3 removes them."
+  type        = number
+  default     = 90
+
+  validation {
+    condition     = var.model_artifact_noncurrent_retention_days >= 30
+    error_message = "Retain non-current model versions for at least 30 days."
+  }
+}
+
+variable "image_builder_model_s3_bucket" {
+  description = "Optional existing bucket containing a private GGUF model artefact. Leave null to use the managed model bucket."
+  type        = string
+  default     = null
+  nullable    = true
+}
+
+variable "image_builder_model_s3_key" {
+  description = "Optional key for the private GGUF model artefact."
+  type        = string
+  default     = null
+  nullable    = true
+}
+
+variable "image_builder_model_sha256" {
+  description = "SHA-256 digest for the optional model artefact."
+  type        = string
+  default     = null
+  nullable    = true
+}
+
+variable "image_builder_model_name" {
+  description = "Ollama name assigned to the optional imported model."
+  type        = string
+  default     = null
+  nullable    = true
+}
+
 variable "gpu_instance_type" {
   description = "EC2 instance type for private inference."
   type        = string

@@ -15,6 +15,8 @@ This repository implements the initial engineering foundation from the [project 
 - AES-256-GCM envelope-encryption primitives and safe in-memory development adapters.
 - A React and TypeScript chat interface with accessible, responsive interactions.
 - Terraform for private networking, KMS, encrypted conversation storage and an optional default-off GPU host.
+- An opt-in EC2 Image Builder pipeline that produces a tested, private Ollama GPU AMI from pinned and checksum-verified inputs.
+- An opt-in private S3 model landing bucket and script for staging a pinned, checksum-verified Hugging Face GGUF.
 - Provider-wide AWS cost tags for project, environment, owner, cost centre and repository reporting.
 - Automated unit, contract, lint, type, build and Terraform checks.
 - Architecture decisions, a threat model and operational runbooks.
@@ -114,6 +116,10 @@ terraform plan -out=tfplan
 
 Do not apply this example to an AWS account until its IAM, state backend, authentication path and cost controls have been reviewed for that account.
 
+To stage a model for the GPU image, use the [model staging
+runbook](ops/runbooks/stage-model.md). It explains the one-time storage setup and
+the script that securely downloads, verifies and uploads an immutable GGUF.
+
 Terraform requires `owner` and `cost_center` values and applies protected cost-allocation
 tags to supported AWS resources automatically. After deployment, activate those tag keys
 in AWS Billing and Cost Management before expecting them in Cost Explorer.
@@ -166,6 +172,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the working agreement.
 
 - The included API has no production authentication or authorisation adapter.
 - Durable S3/KMS repository adapters are still to be implemented and integration-tested.
-- GPU AMIs, model licences, checksums, quotas and regional availability require a deployment-specific decision.
+- The GPU AMI factory is implemented, but model choice and licence acceptance, trusted artefact checksums, GPU quotas and regional availability remain deployment-specific decisions.
+- The image pipeline has not been executed against an AWS account from this repository; its first real build remains an explicit, chargeable deployment step.
 - The frontend uses demonstration data until connected to an authenticated API.
 - This application is not a substitute for professional, medical, legal, financial or emergency support.

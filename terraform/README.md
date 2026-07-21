@@ -7,7 +7,7 @@ only when explicitly enabled, a private GPU inference host.
 The default plan creates no GPU and therefore incurs no GPU-instance charge.
 The GPU subnet has no internet gateway or NAT route. Administration uses AWS
 Systems Manager through VPC endpoints. Model artefacts should be baked into the
-AMI or supplied through a separately reviewed private artefact path.
+AMI or supplied through the optional private model artefact bucket.
 
 ## Use
 
@@ -51,3 +51,39 @@ Create and patch a hardened AMI containing the driver and inference service, set
 `enable_gpu = true`, and provide its AMI ID. The instance receives no public IP.
 Only workloads carrying the application security group may reach the model port.
 The control policy permits start/stop only for the tagged GPU instance.
+
+## Building the inference AMI
+
+To bake a model, first set `enable_model_artifact_bucket = true` and apply the
+reviewed storage-only plan. Then follow the [model staging
+runbook](../ops/runbooks/stage-model.md). The script downloads an immutable
+Hugging Face revision, checks its SHA-256, verifies the bucket controls, and
+uploads it with KMS encryption. It prints the exact Terraform inputs needed by
+Image Builder. You may instead set `image_builder_model_s3_bucket` to an existing
+reviewed private bucket.
+
+Set `enable_image_builder = true` with a pinned AWS GPU DLAMI, exact Ollama
+version, and release-published SHA-256 digest. Terraform creates a manually
+triggered EC2 Image Builder pipeline but does not run it by default. Temporary
+build/test instances use a separate VPC with no inbound security-group rules.
+They have HTTPS egress to retrieve the exact release and contact AWS APIs; this
+does not change the isolated runtime VPC.
+
+The AWSTOE build component verifies NVIDIA, verifies the `.tar.zst` before
+extraction, sets `OLLAMA_NO_CLOUD=1`, installs a hardened systemd service, and can
+download one exact GGUF object from S3, verify it, and import it. The test-stage
+component launches the baked image and verifies NVIDIA and Ollama. When a model
+is staged, it also performs a real generation and requires Ollama to report GPU
+use. A model-less build deliberately skips only the inference test.
+
+Start the output pipeline ARN from approved CI or operations tooling. Setting
+`build_image_now = true` instead starts chargeable GPU build/test instances during
+`terraform apply`. Successful distribution writes the tested private AMI ID to
+the output `aws:ec2:image` SSM parameter. On a later deployment, set
+`gpu_ami_ssm_parameter_name` to that path so the runtime resolves only the AMI
+published after successful tests. The parameter must exist before Terraform can
+read it.
+
+Image Builder component and recipe versions are immutable. Bump
+`image_builder_component_version` whenever either AWSTOE template changes and
+`image_builder_recipe_version` whenever recipe inputs change.

@@ -1,0 +1,50 @@
+name: TestOllama
+description: Test the baked NVIDIA stack, Ollama service, model, and GPU inference.
+schemaVersion: 1.0
+phases:
+  - name: test
+    steps:
+      - name: TestNvidiaRuntime
+        action: ExecuteBash
+        timeoutSeconds: 120
+        onFailure: Abort
+        inputs:
+          commands:
+            - test "$(nvidia-smi --list-gpus | grep --count '^GPU ')" -ge 1
+            - nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv,noheader
+      - name: TestOllamaService
+        action: ExecuteBash
+        timeoutSeconds: 300
+        onFailure: Abort
+        inputs:
+          commands:
+            - |
+              set -euo pipefail
+              systemctl is-enabled --quiet ollama.service
+              for attempt in $(seq 1 60); do
+                if curl --fail --silent http://127.0.0.1:11434/api/tags >/dev/null; then break; fi
+                sleep 2
+              done
+              systemctl is-active --quiet ollama.service
+              /usr/local/bin/ollama --version | grep --fixed-strings '${ollama_version}'
+              curl --fail --silent http://127.0.0.1:11434/api/tags >/dev/null
+      - name: TestGpuInference
+        action: ExecuteBash
+        timeoutSeconds: 1800
+        onFailure: Abort
+        inputs:
+          commands:
+            - |
+              set -euo pipefail
+              if [ '${model_enabled}' != 'true' ]; then
+                echo 'No model configured; NVIDIA and service tests passed, inference test skipped.'
+                exit 0
+              fi
+              /usr/local/bin/ollama show '${model_name}' >/dev/null
+              response=$(curl --fail --silent --show-error --max-time 1200 \
+                http://127.0.0.1:11434/api/generate \
+                --header 'Content-Type: application/json' \
+                --data-binary '{"model":"${model_name}","prompt":"Reply with the word ready.","stream":false}')
+              printf '%s' "$response" | grep --extended-regexp --quiet '"done"[[:space:]]*:[[:space:]]*true'
+              /usr/local/bin/ollama ps
+              /usr/local/bin/ollama ps | grep --extended-regexp --quiet '[1-9][0-9]*% GPU|100% GPU'
