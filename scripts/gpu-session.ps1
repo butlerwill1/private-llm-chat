@@ -150,10 +150,14 @@ AmazonSSMManagedInstanceCore.
             portNumber      = @([string]$RemotePort)
             localPortNumber = @([string]$LocalPort)
         }
+        # Windows PowerShell removes JSON quotation marks when a raw JSON string
+        # is forwarded to a native executable. Escape them once so AWS CLI receives
+        # a valid map of string lists rather than an invalid shorthand value.
+        $escapedParameters = $parameters.Replace('"', '\"')
         & aws @(Get-AwsArguments -Arguments @(
             'ssm', 'start-session', '--target', $InstanceId,
             '--document-name', 'AWS-StartPortForwardingSession',
-            '--parameters', $parameters
+            '--parameters', $escapedParameters
         ))
     }
     if ($LASTEXITCODE -ne 0) {
