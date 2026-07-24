@@ -40,7 +40,10 @@ resource "aws_iam_policy" "application_data" {
 
 # GPU control belongs on a dedicated control-plane role, not every request handler.
 resource "aws_iam_policy" "gpu_control" {
-  count = var.gpu_instance_arn == null ? 0 : 1
+  # The instance ARN is unknown during the first apply. Its presence therefore
+  # cannot safely decide Terraform's resource count; use the caller's explicit
+  # enablement switch while still putting the eventual ARN in the policy body.
+  count = var.enable_gpu_control ? 1 : 0
 
   name        = "${var.name}-gpu-control"
   description = "Start and stop only the private inference instance"

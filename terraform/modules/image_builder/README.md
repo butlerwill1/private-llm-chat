@@ -33,6 +33,18 @@ ID to the module's typed `aws:ec2:image` SSM parameter. A later Terraform run ma
 set `gpu_ami_ssm_parameter_name` to consume it. This two-step flow prevents a
 failed or still-running build from becoming the runtime image.
 
+The service pins `OLLAMA_LLM_LIBRARY=cuda_v12`. Ollama documents this override
+as the fallback when automatic LLM-library detection is unreliable. The image
+test still runs real inference and requires non-zero GPU allocation, so the
+override cannot make a broken CUDA installation pass.
+
+At boot, a bounded systemd pre-start probe runs Ollama's actual CUDA backend
+until it enumerates a GPU. This prevents an early service start from permanently
+falling back to CPU while the EC2 GPU driver is still initialising. Tests also
+check CUDA selection before loading the model, avoiding a long CPU-only cold
+load. Candidate AMIs are tagged `ImageStatus=candidate`; the typed SSM parameter
+is the approval signal because Image Builder creates the AMI before testing it.
+
 AWS component and recipe semantic versions are immutable. Bump the component
 version for template changes and the recipe version for recipe/input changes.
 The deployment identity must be able to pass the two module-created Image Builder
