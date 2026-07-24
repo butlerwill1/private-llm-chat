@@ -12,7 +12,7 @@ balancer, CloudFront distribution, ECS service, or Fargate task.
 3. Install Python 3.12, Node.js 20 or later, pnpm 11, and Terraform 1.9 or later.
 4. Build and deploy the tested GPU AMI using the image-builder runbook.
 5. Set `enable_gpu = true`, keep `enable_ssm_endpoints = false`, and set the
-   approved AMI parameter in `terraform.tfvars`. For the initial reviewed plan,
+   approved AMI parameter in your Terraform variable file. For the initial reviewed plan,
    override only that safe default with `-var="enable_ssm_endpoints=true"` so the
    new instance can register with SSM. Record
    `terraform output -raw gpu_instance_id`.
@@ -32,7 +32,8 @@ services:
 
 ```powershell
 cd terraform
-terraform plan -var="enable_ssm_endpoints=true" -out=ssm-on.tfplan
+$tfvars = "../.local/aws-build.tfvars" # Omit -var-file below if you use terraform.tfvars.
+terraform plan -var-file $tfvars -var "enable_ssm_endpoints=true" -out ssm-on.tfplan
 terraform apply ssm-on.tfplan
 $instanceId = terraform output -raw gpu_instance_id
 cd ..
@@ -140,9 +141,13 @@ collection, but this is not equivalent to private GPU inference.
 
 ```powershell
 cd terraform
-terraform plan -var="enable_ssm_endpoints=false" -out=ssm-off.tfplan
+$tfvars = "../.local/aws-build.tfvars" # Omit -var-file below if you use terraform.tfvars.
+terraform plan -var-file $tfvars -var "enable_ssm_endpoints=false" -out ssm-off.tfplan
+terraform show -no-color ssm-off.tfplan
 terraform apply ssm-off.tfplan
 ```
 
 Do not delete the whole Terraform stack merely to end a session. Conversation
 objects, KMS keys, AMIs and model artefacts have intentional retention controls.
+See the [Terraform lifecycle guide](../../terraform/README.md#cost-and-lifecycle-choices)
+before permanently retiring the project.

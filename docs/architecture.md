@@ -2,26 +2,28 @@
 
 ## Purpose
 
-Private Chat is a personal, authenticated chat application that can use either a privacy-restricted hosted model or a privately networked GPU inference host. Conversation storage, encryption and context assembly remain independent of the selected model backend.
+Private Chat is a personal, loopback-only chat application that can use either a privacy-restricted hosted model or a privately networked GPU inference host. Conversation storage, encryption and context assembly remain independent of the selected model backend.
 
 ## Runtime topology
 
 ```text
 Browser
   |
-  | HTTPS and authenticated requests
+  | Vite /v1 proxy on the same computer
   v
-Public application entry point
+FastAPI bound to 127.0.0.1:8000
   |
-  +---- encrypted objects ----> S3 and KMS
+  +---- application-encrypted objects ----> S3 and KMS
   |
-  +---- TLS ----> approved OpenRouter endpoint
+  +---- TLS ----> approved OpenRouter provider
   |
-  +---- private VPC traffic ----> GPU EC2 instance
-                                  (no public IP or public model port)
+  +---- 127.0.0.1:11434 ----> SSM tunnel ----> GPU EC2 / Ollama
+                                                (no public IP or model port)
 ```
 
-The public entry point and private inference host are intentionally separate. The application control plane remains available while GPU compute is stopped and can authorise a user before starting the GPU or forwarding a request.
+The current personal deployment has no public application entry point. A future
+public deployment would add authentication and authorisation at a separate edge
+before exposing FastAPI; it must not expose the GPU or model port directly.
 
 ## Application boundaries
 
@@ -40,8 +42,7 @@ Pydantic validates untrusted HTTP data and configuration. Domain and application
 
 ### Send a message
 
-1. Authenticate and authorise access to the conversation.
-2. Validate the request at the API boundary.
+1. Validate the request at the API boundary.
 3. Load and decrypt only the context needed for this request.
 4. Build context from system instructions, rolling summary, sourced memories, recent messages and the current message.
 5. Invoke the configured `ModelClient`.
@@ -54,7 +55,11 @@ The encrypted full transcript is authoritative. Rolling summaries and memories a
 
 ### Start a GPU backend
 
-The application calls an `InferenceHostManager` implementation to request a start, polls readiness through a private endpoint, and only then sends inference traffic. The GPU host is replaceable compute; encrypted conversation storage does not depend on its lifecycle.
+The local session helper starts the Terraform-managed EC2 instance, waits for
+Systems Manager readiness, then opens a loopback tunnel to Ollama. FastAPI does
+not receive AWS control credentials and does not start the host on a browser
+request. The GPU host is replaceable compute; encrypted conversation storage
+does not depend on its lifecycle.
 
 ## Quality strategy
 
@@ -64,4 +69,3 @@ The application calls an `InferenceHostManager` implementation to request a star
 - Privacy regression tests assert that required routing controls cannot be omitted.
 - Frontend tests cover the primary conversation workflow and accessibility-critical controls.
 - Terraform checks cover formatting, validation and policy-sensitive defaults.
-

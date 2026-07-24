@@ -28,9 +28,9 @@ pnpm lint
 pnpm test
 pnpm build
 
-cd ../terraform/environments/dev
+cd ../terraform
 terraform init -backend=false
-terraform fmt -check -recursive ../..
+terraform fmt -check -recursive .
 terraform validate
 ```
 

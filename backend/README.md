@@ -56,6 +56,27 @@ identity must carry the output application data policy. Each message remains
 application-encrypted before S3 receives it; bucket SSE-KMS is an additional
 storage control.
 
+## Model modes and API behaviour
+
+- **Self-hosted mode** is the default. The backend calls an OpenAI-compatible
+  Ollama or vLLM endpoint, normally the local end of the SSM tunnel at
+  `http://127.0.0.1:11434/v1`.
+- **OpenRouter-only mode** is started with
+  `..\\scripts\\start-openrouter-backend.ps1`. It requires an API key and a
+  reviewed provider allowlist in the current shell. The helper does not start
+  AWS resources or a GPU.
+- `GET /v1/models` returns the backend-approved model catalogue. The browser
+  cannot use a model ID outside that catalogue unless custom OpenRouter models
+  were explicitly enabled.
+- `GET /v1/conversation-summaries` returns only sidebar metadata. It avoids
+  decrypting every conversation when the interface first opens.
+
+Self-hosted requests have a finite, configurable timeout
+(`CHAT_MODEL_RESPONSE_TIMEOUT_SECONDS`, default 300 seconds). A tunnel or model
+timeout is returned as HTTP 504 rather than leaving the browser request open
+indefinitely. The browser displays completed responses only; token streaming is
+not yet part of the API contract.
+
 ## Quality checks
 
 ```powershell

@@ -43,22 +43,22 @@ export class DemoChatApi implements ChatApi {
     return Promise.resolve(this.conversations)
   }
 
-  async listConversationSummaries(): Promise<readonly ConversationSummary[]> {
-    return this.conversations.map(({ id, title }) => ({ id, title }))
+  listConversationSummaries(): Promise<readonly ConversationSummary[]> {
+    return Promise.resolve(this.conversations.map(({ id, title }) => ({ id, title })))
   }
 
-  async getConversation(conversationId: string): Promise<Conversation> {
+  getConversation(conversationId: string): Promise<Conversation> {
     const conversation = this.conversations.find(({ id }) => id === conversationId)
-    if (!conversation) throw new Error('The selected conversation could not be found.')
-    return conversation
+    if (!conversation) return Promise.reject(new Error('The selected conversation could not be found.'))
+    return Promise.resolve(conversation)
   }
 
-  async listModels(): Promise<readonly ModelOption[]> {
-    return [{ id: 'private-chat', label: 'Private GPU (Ollama)', backend: 'self_hosted' }]
+  listModels(): Promise<readonly ModelOption[]> {
+    return Promise.resolve([{ id: 'private-chat', label: 'Private GPU (Ollama)', backend: 'self_hosted' }])
   }
 
-  async getModelConfiguration(): Promise<ModelConfiguration> {
-    return { customOpenRouterModelAllowed: false }
+  getModelConfiguration(): Promise<ModelConfiguration> {
+    return Promise.resolve({ customOpenRouterModelAllowed: false })
   }
 
   async createConversation(): Promise<Conversation> {
