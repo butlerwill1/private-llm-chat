@@ -6,19 +6,14 @@ Private Chat is a personal, loopback-only chat application that can use either a
 
 ## Runtime topology
 
-```text
-Browser
-  |
-  | Vite /v1 proxy on the same computer
-  v
-FastAPI bound to 127.0.0.1:8000
-  |
-  +---- application-encrypted objects ----> S3 and KMS
-  |
-  +---- TLS ----> approved OpenRouter provider
-  |
-  +---- 127.0.0.1:11434 ----> SSM tunnel ----> GPU EC2 / Ollama
-                                                (no public IP or model port)
+```mermaid
+flowchart LR
+    Browser["Browser"] -->|"Vite /v1 proxy on the same computer"| API["FastAPI on 127.0.0.1:8000"]
+    API -->|"application-encrypted objects"| Storage["S3 and KMS"]
+    API -->|"OpenRouter-only mode over TLS"| OpenRouter["Approved OpenRouter provider"]
+    API -->|"Private-GPU mode"| Tunnel["SSM tunnel on 127.0.0.1:11434"]
+    Tunnel --> GPU["GPU EC2 with Ollama"]
+    GPU --- Security["No public IP or public model port"]
 ```
 
 The current personal deployment has no public application entry point. A future

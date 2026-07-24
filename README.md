@@ -1,6 +1,6 @@
 # Private Chat on AWS
 
-Private Chat is a privacy-first personal chatbot with application-encrypted conversation storage and replaceable model backends. It supports either a private Ollama model on an AWS GPU or a privacy-restricted OpenRouter session, using the same local web interface.
+Private Chat is a working privacy-first personal chatbot with application-encrypted conversation storage and replaceable model backends. Its private-GPU path runs a pre-built Ollama model on a private AWS EC2 GPU instance, starts that instance only for a session, and reaches it through an encrypted SSM tunnel with no public IP or model port. It also supports a privacy-restricted OpenRouter-only session through the same local web interface.
 
 This repository implements the engineering foundation from the [project brief](Private-AWS-Chatbot-Project-Brief.docx). It is designed for personal, loopback-only use. It is not a public multi-user deployment: authentication and authorisation would be required before exposing the API beyond the computer running it.
 
@@ -35,32 +35,26 @@ For a private GPU session, follow the [personal session runbook](ops/runbooks/pe
 
 ## Architecture
 
-```text
-Browser on your computer
-  |  loopback /v1 proxy
-  v
-React (Vite) ----> FastAPI on 127.0.0.1:8000
-                         |---- encrypted conversation objects ----> S3 + KMS
-                         |
-                         |---- TLS ----> approved OpenRouter provider
-                         |
-                         +---- local SSM tunnel ----> private GPU EC2 / Ollama
-                                                       no public IP or model port
+```mermaid
+flowchart LR
+    Browser["Browser on your computer"] -->|"/v1 loopback proxy"| Vite["React and Vite"]
+    Vite --> API["FastAPI on 127.0.0.1:8000"]
+    API -->|"encrypted conversation objects"| Storage["S3 and KMS"]
+    API -->|"OpenRouter-only mode over TLS"| OpenRouter["Approved OpenRouter provider"]
+    API -->|"Private-GPU mode"| Tunnel["Local SSM tunnel on 127.0.0.1:11434"]
+    Tunnel --> GPU["Private EC2 GPU with Ollama"]
 ```
 
 The browser never connects directly to the GPU or to OpenRouter. In private-GPU mode, the SSM tunnel makes Ollama appear locally at `127.0.0.1:11434`; FastAPI then talks to that loopback address. The GPU can be stopped between sessions without affecting stored conversations.
 
 The backend uses explicit dependency inversion:
 
-```text
-API and Pydantic schemas
-          |
-          v
-Application use cases ----> Protocol ports
-          |                       |
-          v                       v
-Domain rules              OpenRouter, Ollama/vLLM,
-                          encryption, storage and AWS adapters
+```mermaid
+flowchart TD
+    API["API and Pydantic schemas"] --> UseCases["Application use cases"]
+    UseCases --> Domain["Domain rules"]
+    UseCases --> Ports["Typed protocol ports"]
+    Ports --> Adapters["OpenRouter, Ollama or vLLM, encryption, storage and AWS adapters"]
 ```
 
 See [the architecture guide](docs/architecture.md) and [architecture decisions](docs/adr) for the reasoning behind these boundaries.
