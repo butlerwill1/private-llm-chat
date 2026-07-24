@@ -3,68 +3,144 @@ import { Composer } from './components/Composer'
 import { ConversationHeader } from './components/ConversationHeader'
 import { MessageList } from './components/MessageList'
 import { Sidebar } from './components/Sidebar'
-import type { ChatApi, Conversation, ModelChoice } from './domain/chat'
+import type { ChatApi, Conversation, ConversationSummary, ModelConfiguration, ModelOption } from './domain/chat'
 
 interface AppProps {
   readonly api: ChatApi
   readonly initialConversations: readonly Conversation[]
+  readonly initialSummaries: readonly ConversationSummary[]
+  readonly models: readonly ModelOption[]
+  readonly modelConfiguration: ModelConfiguration
 }
 
-export function App({ api, initialConversations }: AppProps) {
+export function App({ api, initialConversations, initialSummaries, models, modelConfiguration }: AppProps) {
   const [conversations, setConversations] = useState<readonly Conversation[]>(() => initialConversations)
-  const [selectedId, setSelectedId] = useState(initialConversations[0]?.id ?? '')
+  const [summaries, setSummaries] = useState<readonly ConversationSummary[]>(() => initialSummaries)
+  const [selectedId, setSelectedId] = useState(initialSummaries[0]?.id ?? '')
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [isSending, setIsSending] = useState(false)
-  const selectedConversation = conversations.find(({ id }) => id === selectedId) ?? conversations[0]
+  const [isLoadingConversation, setIsLoadingConversation] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [selectedModelId, setSelectedModelId] = useState(models[0]?.id ?? '')
+  const [error, setError] = useState<string | null>(null)
+  const selectedConversation = conversations.find(({ id }) => id === selectedId)
 
-  const selectConversation = (id: string) => {
+  const selectConversation = async (id: string) => {
+    if (id === selectedId) return
     setSelectedId(id)
     setSidebarOpen(false)
+    setIsLoadingConversation(true)
+    setError(null)
+    try {
+      const conversation = await api.getConversation(id)
+      setConversations((current) => [
+        ...current.filter((item) => item.id !== conversation.id),
+        conversation,
+      ])
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'The conversation could not be loaded.')
+    } finally {
+      setIsLoadingConversation(false)
+    }
   }
 
   const createConversation = async () => {
-    const conversation = await api.createConversation()
-    startTransition(() => {
-      setConversations((current) => [conversation, ...current])
-      setSelectedId(conversation.id)
-      setSidebarOpen(false)
-    })
+    setError(null)
+    try {
+      const conversation = await api.createConversation()
+      startTransition(() => {
+        setConversations((current) => [conversation, ...current])
+        setSummaries((current) => [{ id: conversation.id, title: conversation.title }, ...current])
+        setSelectedId(conversation.id)
+        setSidebarOpen(false)
+      })
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'The conversation could not be created.')
+    }
   }
 
-  const sendMessage = async (body: string, model: ModelChoice) => {
+  const sendMessage = async (body: string, modelId: string) => {
     if (!selectedConversation) return
     setIsSending(true)
+    setError(null)
     try {
-      const updated = await api.sendMessage({ conversationId: selectedConversation.id, body, model })
+      const updated = await api.sendMessage({ conversationId: selectedConversation.id, body, modelId })
       startTransition(() => {
         setConversations((current) => current.map((conversation) =>
           conversation.id === updated.id ? updated : conversation,
         ))
       })
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'The message could not be sent.')
     } finally {
       setIsSending(false)
     }
   }
 
-  if (!selectedConversation) {
-    return <main className="empty-app">No conversations are available.</main>
+  const deleteConversation = async () => {
+    if (!selectedConversation
+      || !window.confirm('Delete this conversation and its encrypted transcript?')) return
+    setError(null)
+    try {
+      await api.deleteConversation(selectedConversation.id)
+      const remaining = conversations.filter(({ id }) => id !== selectedConversation.id)
+      startTransition(() => {
+        setConversations(remaining)
+        const remainingSummaries = summaries.filter(({ id }) => id !== selectedConversation.id)
+        setSummaries(remainingSummaries)
+        setSelectedId(remainingSummaries[0]?.id ?? '')
+      })
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'The conversation could not be deleted.')
+    }
+  }
+
+  if (!selectedConversation && !isLoadingConversation) {
+    return (
+      <main className="empty-app">
+        <p>No conversations are available.</p>
+        <button type="button" onClick={() => void createConversation()}>Start a conversation</button>
+        {error ? <p className="request-error" role="alert">{error}</p> : null}
+      </main>
+    )
   }
 
   return (
     <div className="app-shell">
       <Sidebar
-        conversations={conversations}
-        selectedId={selectedConversation.id}
+        conversations={summaries}
+        selectedId={selectedId}
         isOpen={sidebarOpen}
         onToggle={() => setSidebarOpen((open) => !open)}
         onNewConversation={() => void createConversation()}
-        onSelectConversation={selectConversation}
+        onSelectConversation={(id) => void selectConversation(id)}
+        onSettings={() => setSettingsOpen(true)}
       />
       <main className="chat-main">
-        <ConversationHeader title={selectedConversation.title} />
-        <MessageList messages={selectedConversation.messages} />
-        <Composer disabled={isSending} onSend={sendMessage} />
+        <ConversationHeader
+          title={selectedConversation?.title ?? 'Loading conversation'}
+          onDelete={() => void deleteConversation()}
+        />
+        {selectedConversation ? <MessageList messages={selectedConversation.messages} /> : <p className="conversation-loading">Loading encrypted conversation…</p>}
+        {isSending ? <p className="response-pending" role="status">The local model is generating a response…</p> : null}
+        {error ? <p className="request-error" role="alert">{error}</p> : null}
+        <Composer disabled={isSending} selectedModelId={selectedModelId} onSend={sendMessage} />
       </main>
+      {settingsOpen ? (
+        <div className="settings-backdrop" role="presentation" onClick={() => setSettingsOpen(false)}>
+          <section className="settings-panel" role="dialog" aria-modal="true" aria-labelledby="settings-title" onClick={(event) => event.stopPropagation()}>
+            <div className="settings-heading"><h2 id="settings-title">Session settings</h2><button type="button" onClick={() => setSettingsOpen(false)}>Close</button></div>
+            <dl><dt>Selected model</dt><dd>{models.find((item) => item.id === selectedModelId)?.label ?? selectedModelId}</dd><dt>Transcript storage</dt><dd>Envelope encrypted, stored in S3</dd><dt>Response display</dt><dd>Shown once generation completes</dd></dl>
+            <label className="settings-model-label" htmlFor="settings-model">Model</label>
+            <select id="settings-model" value={models.some((item) => item.id === selectedModelId) ? selectedModelId : ''} onChange={(event) => setSelectedModelId(event.target.value)}>
+              {models.map((model) => <option key={model.id} value={model.id}>{model.label}</option>)}
+              {modelConfiguration.customOpenRouterModelAllowed ? <option value="">Custom OpenRouter model ID</option> : null}
+            </select>
+            {modelConfiguration.customOpenRouterModelAllowed ? <input className="settings-model-input" aria-label="Custom OpenRouter model ID" value={models.some((item) => item.id === selectedModelId) ? '' : selectedModelId} onChange={(event) => setSelectedModelId(event.target.value)} placeholder="organisation/model-name" /> : null}
+            <p className="settings-note">GPU temperature and total GPU memory require a dedicated remote telemetry endpoint; they are not inferred from the browser.</p>
+          </section>
+        </div>
+      ) : null}
     </div>
   )
 }

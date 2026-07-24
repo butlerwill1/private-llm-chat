@@ -4,7 +4,7 @@ import base64
 import binascii
 from enum import StrEnum
 
-from pydantic import SecretStr, field_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -13,6 +13,13 @@ class ModelBackend(StrEnum):
 
     OPENROUTER = "openrouter"
     SELF_HOSTED = "self_hosted"
+
+
+class StorageBackend(StrEnum):
+    """Persistence implementations selected at the composition root."""
+
+    MEMORY = "memory"
+    S3 = "s3"
 
 
 class Settings(BaseSettings):
@@ -27,16 +34,48 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="CHAT_", env_file=".env", extra="ignore")
     environment: str = "development"
     model_backend: ModelBackend = ModelBackend.SELF_HOSTED
-    local_master_key_b64: SecretStr
+    model_name: str = "private-chat"
+    storage_backend: StorageBackend = StorageBackend.MEMORY
+    local_master_key_b64: SecretStr | None = None
+    conversation_bucket: str | None = None
+    kms_key_id: str | None = None
+    aws_region: str = "eu-west-2"
     self_hosted_base_url: str = "http://127.0.0.1:11434/v1"
     self_hosted_api_key: SecretStr | None = None
+    # Local models can take longer than a hosted API, especially for the first
+    # request after startup. Keep the limit finite so a broken tunnel does not
+    # leave a browser request open forever, but generous enough for GPU inference.
+    model_response_timeout_seconds: int = Field(default=300, ge=1, le=900)
     openrouter_api_key: SecretStr | None = None
+    enable_openrouter: bool = False
+    # A comma-separated CHAT_OPENROUTER_MODELS value is deliberately an
+    # allowlist. The browser never supplies arbitrary upstream model IDs.
+    openrouter_models: tuple[str, ...] = (
+        "meta-llama/llama-3.3-70b-instruct",
+        "qwen/qwen3-32b",
+        "deepseek/deepseek-r1",
+        "mistralai/mistral-small-3.1-24b-instruct",
+        "google/gemma-3-27b-it",
+    )
+    allow_custom_openrouter_model: bool = False
     openrouter_allowed_providers: tuple[str, ...] = ()
+
+    @field_validator("openrouter_models", "openrouter_allowed_providers", mode="before")
+    @classmethod
+    def split_model_lists(cls, value: object) -> tuple[str, ...] | object:
+        """Accept ergonomic comma-separated environment settings as immutable tuples."""
+
+        if isinstance(value, str):
+            return tuple(item.strip() for item in value.split(",") if item.strip())
+        return value
 
     @field_validator("local_master_key_b64")
     @classmethod
-    def validate_master_key(cls, value: SecretStr) -> SecretStr:
+    def validate_master_key(cls, value: SecretStr | None) -> SecretStr | None:
         """Fail during startup unless the local development key is exactly 256 bits."""
+
+        if value is None:
+            return None
 
         try:
             decoded = base64.b64decode(value.get_secret_value(), validate=True)
@@ -46,7 +85,29 @@ class Settings(BaseSettings):
             raise ValueError("Decoded master key must contain exactly 32 bytes")
         return value
 
+    @model_validator(mode="after")
+    def validate_storage_configuration(self) -> "Settings":
+        """Require exactly the credentials needed by the selected storage adapter."""
+
+        if self.storage_backend is StorageBackend.MEMORY and self.local_master_key_b64 is None:
+            raise ValueError("CHAT_LOCAL_MASTER_KEY_B64 is required for memory storage")
+        if self.storage_backend is StorageBackend.S3:
+            if self.conversation_bucket is None or self.kms_key_id is None:
+                raise ValueError(
+                    "CHAT_CONVERSATION_BUCKET and CHAT_KMS_KEY_ID are required for S3 storage"
+                )
+        if self.enable_openrouter or self.model_backend is ModelBackend.OPENROUTER:
+            if self.openrouter_api_key is None:
+                raise ValueError("CHAT_OPENROUTER_API_KEY is required for CHAT_OPENROUTER_MODELS")
+            if not self.openrouter_allowed_providers:
+                raise ValueError(
+                    "CHAT_OPENROUTER_ALLOWED_PROVIDERS is required for CHAT_OPENROUTER_MODELS"
+                )
+        return self
+
     def local_master_key(self) -> bytes:
         """Decode the already-validated local key at the composition boundary."""
 
+        if self.local_master_key_b64 is None:
+            raise RuntimeError("Local master key is unavailable for the selected storage backend")
         return base64.b64decode(self.local_master_key_b64.get_secret_value(), validate=True)

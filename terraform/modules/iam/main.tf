@@ -1,3 +1,5 @@
+data "aws_partition" "current" {}
+
 resource "aws_iam_policy" "application_data" {
   name        = "${var.name}-application-data"
   description = "Read and write encrypted private LLM conversation data"
@@ -38,7 +40,10 @@ resource "aws_iam_policy" "application_data" {
 
 # GPU control belongs on a dedicated control-plane role, not every request handler.
 resource "aws_iam_policy" "gpu_control" {
-  count = var.gpu_instance_arn == null ? 0 : 1
+  # The instance ARN is unknown during the first apply. Its presence therefore
+  # cannot safely decide Terraform's resource count; use the caller's explicit
+  # enablement switch while still putting the eventual ARN in the policy body.
+  count = var.enable_gpu_control ? 1 : 0
 
   name        = "${var.name}-gpu-control"
   description = "Start and stop only the private inference instance"
@@ -56,10 +61,31 @@ resource "aws_iam_policy" "gpu_control" {
         }
       },
       {
-        Sid      = "DescribeForReadinessChecks"
-        Effect   = "Allow"
-        Action   = ["ec2:DescribeInstances", "ec2:DescribeInstanceStatus"]
+        Sid    = "DescribeForReadinessChecks"
+        Effect = "Allow"
+        Action = [
+          "ec2:DescribeInstances",
+          "ec2:DescribeInstanceStatus",
+          "ssm:DescribeInstanceInformation",
+          "ssm:GetConnectionStatus"
+        ]
         Resource = "*"
+      },
+      {
+        Sid    = "StartPrivateGpuSessions"
+        Effect = "Allow"
+        Action = ["ssm:StartSession"]
+        Resource = [
+          var.gpu_instance_arn,
+          "arn:${data.aws_partition.current.partition}:ssm:${var.aws_region}::document/AWS-StartPortForwardingSession",
+          "arn:${data.aws_partition.current.partition}:ssm:${var.aws_region}::document/SSM-SessionManagerRunShell"
+        ]
+      },
+      {
+        Sid      = "ControlOwnRegionSessions"
+        Effect   = "Allow"
+        Action   = ["ssm:ResumeSession", "ssm:TerminateSession"]
+        Resource = "arn:${data.aws_partition.current.partition}:ssm:${var.aws_region}:${var.account_id}:session/$${aws:userid}-*"
       }
     ]
   })

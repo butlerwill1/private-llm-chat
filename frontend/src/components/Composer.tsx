@@ -1,22 +1,21 @@
 import { useState, type FormEvent } from 'react'
-import type { ModelChoice } from '../domain/chat'
 import { SendIcon } from './Icons'
 
 interface ComposerProps {
   readonly disabled: boolean
-  readonly onSend: (body: string, model: ModelChoice) => Promise<void>
+  readonly selectedModelId: string
+  readonly onSend: (body: string, modelId: string) => Promise<void>
 }
 
-export function Composer({ disabled, onSend }: ComposerProps) {
+export function Composer({ disabled, selectedModelId, onSend }: ComposerProps) {
   const [body, setBody] = useState('')
-  const [model, setModel] = useState<ModelChoice>('private')
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     const message = body.trim()
     if (message.length === 0 || disabled) return
     setBody('')
-    await onSend(message, model)
+    await onSend(message, selectedModelId)
   }
 
   return (
@@ -31,11 +30,6 @@ export function Composer({ disabled, onSend }: ComposerProps) {
           rows={1}
           disabled={disabled}
         />
-        <label className="sr-only" htmlFor="model">Model</label>
-        <select id="model" value={model} onChange={(event) => setModel(event.target.value as ModelChoice)} disabled={disabled}>
-          <option value="private">Private model</option>
-          <option value="openrouter">OpenRouter</option>
-        </select>
         <button className="send-button" type="submit" disabled={disabled || body.trim().length === 0} aria-label="Send message">
           <SendIcon />
         </button>

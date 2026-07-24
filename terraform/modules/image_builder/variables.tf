@@ -76,14 +76,29 @@ variable "build_instance_types" {
   }
 }
 
+variable "build_availability_zone" {
+  description = "Optional availability zone for the Image Builder subnet; use this to avoid a temporary zonal GPU-capacity shortage."
+  type        = string
+  default     = null
+  nullable    = true
+
+  validation {
+    condition = (
+      var.build_availability_zone == null ||
+      can(regex("^[a-z]{2}(-gov)?-[a-z]+-[0-9][a-z]$", var.build_availability_zone))
+    )
+    error_message = "build_availability_zone must be null or an availability zone such as eu-west-2a."
+  }
+}
+
 variable "root_volume_gib" {
   description = "Encrypted root volume size for build, test, and resulting AMI."
   type        = number
-  default     = 200
+  default     = 100
 
   validation {
-    condition     = var.root_volume_gib >= 50
-    error_message = "root_volume_gib must be at least 50 GiB."
+    condition     = var.root_volume_gib >= 75
+    error_message = "root_volume_gib must be at least 75 GiB, the current parent AMI snapshot size."
   }
 }
 

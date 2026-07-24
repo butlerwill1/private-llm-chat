@@ -11,7 +11,9 @@ pnpm install
 pnpm run dev
 ```
 
-Vite prints the local address when it starts. The default development experience uses `DemoChatApi`, so the main workflows can be explored without cloud credentials or a running backend.
+Vite prints the local address when it starts. The application uses `HttpChatApi`
+and proxies `/v1` to FastAPI on `127.0.0.1:8000`. Tests retain `DemoChatApi` as a
+fast interface-compatible test double.
 
 ## Quality checks
 
@@ -24,11 +26,29 @@ pnpm run build
 ## Architecture
 
 - `src/domain/chat.ts` owns the stable application types and the `ChatApi` interface.
-- `src/data/demoChatApi.ts` is an in-memory adapter used for local development and tests.
+- `src/data/httpChatApi.ts` is the runtime HTTP adapter; `demoChatApi.ts` is its in-memory test double.
 - `src/components/` contains focused UI components with typed inputs and semantic markup.
 - `src/App.tsx` composes the screen and owns only screen-level state.
 
-When the backend API is available, add an HTTP implementation of `ChatApi` and inject it in `main.tsx`. Keep authentication, validation, error mapping and transport concerns inside that adapter; components should continue to work with domain types only.
+`src/data/httpChatApi.ts` owns response validation, error mapping and transport
+details. UI components continue to work only with the domain-level `ChatApi`.
+
+## Current interface behaviour
+
+- Assistant messages render safe Markdown, including headings, lists, links and
+  code blocks. Raw HTML is not enabled.
+- The settings dialog selects from the model catalogue returned by the backend.
+  In OpenRouter-only mode it can optionally allow an explicitly enabled custom
+  model ID.
+- Responses are displayed after generation completes. While a request is in
+  progress, the composer is disabled and a status message explains that the
+  local model is generating.
+- Conversation navigation initially loads metadata only; opening a conversation
+  fetches and decrypts that conversation on demand.
+
+The settings dialog does not claim to show GPU telemetry. GPU temperature,
+utilisation and VRAM use require a separate authenticated telemetry endpoint and
+are deliberately left out of the browser for now.
 
 ## Accessibility and privacy
 

@@ -74,6 +74,34 @@ variable "enable_gpu" {
   default     = false
 }
 
+variable "enable_ssm_endpoints" {
+  description = "Create private, hourly-billed Systems Manager endpoints. Enable for a session and disable afterwards to minimise personal-use cost."
+  type        = bool
+  default     = false
+}
+
+variable "ssm_endpoint_services" {
+  description = "Systems Manager PrivateLink services required by the GPU's SSM Agent. Add ec2messages only for an older agent that requires it."
+  type        = set(string)
+  default     = ["ssm", "ssmmessages"]
+
+  validation {
+    condition     = contains(var.ssm_endpoint_services, "ssm") && contains(var.ssm_endpoint_services, "ssmmessages")
+    error_message = "ssm_endpoint_services must include ssm and ssmmessages."
+  }
+}
+
+variable "ssm_endpoint_subnet_count" {
+  description = "Number of availability zones containing hourly-billed SSM endpoints. One is appropriate for personal use; two improves production availability."
+  type        = number
+  default     = 1
+
+  validation {
+    condition     = var.ssm_endpoint_subnet_count >= 1 && var.ssm_endpoint_subnet_count <= 2
+    error_message = "ssm_endpoint_subnet_count must be one or two."
+  }
+}
+
 variable "gpu_ami_id" {
   description = "ID of a hardened, pre-baked AMI containing the NVIDIA driver and inference server. Required when enable_gpu is true."
   type        = string
@@ -157,19 +185,35 @@ variable "ollama_sha256" {
 variable "image_builder_component_version" {
   description = "AWSTOE component version. Bump whenever component templates change."
   type        = string
-  default     = "1.0.0"
+  default     = "1.0.5"
 }
 
 variable "image_builder_recipe_version" {
   description = "Image recipe version. Bump whenever recipe inputs change."
   type        = string
-  default     = "1.0.0"
+  default     = "1.0.5"
 }
 
 variable "image_builder_instance_types" {
-  description = "GPU-capable instance types available for Image Builder build and test stages."
+  description = "Compatible GPU instance types Image Builder may select by available capacity, in preference order."
   type        = list(string)
-  default     = ["g6.xlarge"]
+  default     = ["g6.xlarge", "g5.xlarge", "g4dn.xlarge"]
+}
+
+variable "image_builder_availability_zone" {
+  description = "Optional availability zone for temporary Image Builder instances."
+  type        = string
+  default     = null
+  nullable    = true
+
+  validation {
+    condition = (
+      var.image_builder_availability_zone == null ||
+      startswith(var.image_builder_availability_zone, "${var.aws_region}") &&
+      can(regex("^[a-z]{2}(-gov)?-[a-z]+-[0-9][a-z]$", var.image_builder_availability_zone))
+    )
+    error_message = "image_builder_availability_zone must belong to aws_region, for example eu-west-2a."
+  }
 }
 
 variable "enable_model_artifact_bucket" {
@@ -226,11 +270,22 @@ variable "gpu_instance_type" {
 variable "gpu_root_volume_gib" {
   description = "Encrypted root volume size, including room for model weights."
   type        = number
-  default     = 200
+  default     = 100
 
   validation {
-    condition     = var.gpu_root_volume_gib >= 50
-    error_message = "gpu_root_volume_gib must be at least 50 GiB."
+    condition     = var.gpu_root_volume_gib >= 75
+    error_message = "gpu_root_volume_gib must be at least 75 GiB, the current parent AMI snapshot size."
+  }
+}
+
+variable "gpu_max_runtime_minutes" {
+  description = "Hard instance-side safety limit after each GPU boot, even if the controlling laptop disconnects."
+  type        = number
+  default     = 120
+
+  validation {
+    condition     = var.gpu_max_runtime_minutes >= 15 && var.gpu_max_runtime_minutes <= 720
+    error_message = "gpu_max_runtime_minutes must be between 15 and 720 minutes."
   }
 }
 

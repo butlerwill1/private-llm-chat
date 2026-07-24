@@ -76,16 +76,20 @@ jobs:
         run: terraform validate
       - name: Test safe infrastructure defaults
         run: terraform test
-      - name: Validate model staging script syntax
+      - name: Validate PowerShell operations scripts
         shell: pwsh
         run: |
-          $tokens = $null
-          $errors = $null
-          [System.Management.Automation.Language.Parser]::ParseFile(
-            (Resolve-Path ../scripts/stage-model.ps1),
-            [ref]$tokens,
-            [ref]$errors
-          ) | Out-Null
+          $errors = @()
+          Get-ChildItem ../scripts/*.ps1 | ForEach-Object {
+            $tokens = $null
+            $fileErrors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              $_.FullName,
+              [ref]$tokens,
+              [ref]$fileErrors
+            ) | Out-Null
+            $errors += $fileErrors
+          }
           if ($errors.Count -gt 0) {
             $errors | ForEach-Object { Write-Error $_.Message }
             exit 1

@@ -1,4 +1,4 @@
-import type { ChatApi, Conversation, SendMessageRequest } from '../domain/chat'
+import type { ChatApi, Conversation, ConversationSummary, ModelConfiguration, ModelOption, SendMessageRequest } from '../domain/chat'
 
 const starterConversations: readonly Conversation[] = [
   {
@@ -43,6 +43,24 @@ export class DemoChatApi implements ChatApi {
     return Promise.resolve(this.conversations)
   }
 
+  listConversationSummaries(): Promise<readonly ConversationSummary[]> {
+    return Promise.resolve(this.conversations.map(({ id, title }) => ({ id, title })))
+  }
+
+  getConversation(conversationId: string): Promise<Conversation> {
+    const conversation = this.conversations.find(({ id }) => id === conversationId)
+    if (!conversation) return Promise.reject(new Error('The selected conversation could not be found.'))
+    return Promise.resolve(conversation)
+  }
+
+  listModels(): Promise<readonly ModelOption[]> {
+    return Promise.resolve([{ id: 'private-chat', label: 'Private GPU (Ollama)', backend: 'self_hosted' }])
+  }
+
+  getModelConfiguration(): Promise<ModelConfiguration> {
+    return Promise.resolve({ customOpenRouterModelAllowed: false })
+  }
+
   async createConversation(): Promise<Conversation> {
     const conversation: Conversation = {
       id: makeId(),
@@ -59,9 +77,7 @@ export class DemoChatApi implements ChatApi {
       throw new Error('The selected conversation could not be found.')
     }
 
-    const response = request.model === 'private'
-      ? 'Thank you for sharing that. What feels most important about it?'
-      : 'I understand. What would be a useful next step to explore?'
+    const response = 'Thank you for sharing that. What feels most important about it?'
     const updated: Conversation = {
       ...current,
       messages: [
@@ -74,5 +90,10 @@ export class DemoChatApi implements ChatApi {
       conversation.id === updated.id ? updated : conversation,
     )
     return Promise.resolve(updated)
+  }
+
+  async deleteConversation(conversationId: string): Promise<void> {
+    this.conversations = this.conversations.filter(({ id }) => id !== conversationId)
+    return Promise.resolve()
   }
 }

@@ -41,6 +41,9 @@ Thumbs.db
 # Local runtime data
 .local/
 tmp/
+# Image Builder logs can contain AWS identifiers and are diagnostic artefacts,
+# not source code. Keep local downloads available without committing them.
+image-builder-logs/
 
 # Model weights must be staged in private object storage, never committed.
 *.gguf

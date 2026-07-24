@@ -18,7 +18,8 @@ button, textarea, select { font: inherit; }
 button, select, summary { -webkit-tap-highlight-color: transparent; }
 button:focus-visible, textarea:focus-visible, select:focus-visible, summary:focus-visible { outline: 3px solid rgba(0, 107, 60, 0.25); outline-offset: 2px; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
-.empty-app { display: grid; min-height: 100vh; place-items: center; }
+.empty-app { display: grid; min-height: 100vh; place-content: center; justify-items: center; gap: 16px; }
+.empty-app button { padding: 12px 18px; border: 1px solid var(--green); border-radius: 6px; color: var(--green); background: #fff; cursor: pointer; }
 
 .app-shell { display: grid; grid-template-columns: 364px minmax(0, 1fr); min-height: 100vh; }
 .sidebar { border-right: 1px solid var(--line); background: #fff; }
@@ -43,6 +44,9 @@ button:focus-visible, textarea:focus-visible, select:focus-visible, summary:focu
 .chat-main { display: grid; grid-template-rows: 190px minmax(320px, 1fr) auto; min-height: 100vh; overflow: hidden; }
 .conversation-header { display: flex; align-items: flex-start; justify-content: space-between; padding: 111px 51px 0 49px; }
 .conversation-header h1 { margin: 0; font-family: Georgia, "Times New Roman", serif; font-size: 38px; font-weight: 400; line-height: 1.15; letter-spacing: -0.025em; }
+.conversation-actions { display: flex; align-items: center; gap: 24px; }
+.delete-conversation { padding: 8px 0; border: 0; color: #8a2323; background: transparent; cursor: pointer; }
+.delete-conversation:hover { text-decoration: underline; }
 .privacy-details { position: relative; color: var(--green); }
 .privacy-details summary { display: flex; align-items: center; gap: 11px; padding: 8px 0; font-size: 20px; cursor: pointer; list-style: none; }
 .privacy-details summary::-webkit-details-marker { display: none; }
@@ -58,6 +62,15 @@ button:focus-visible, textarea:focus-visible, select:focus-visible, summary:focu
 .message-content { padding-top: 8px; font-size: 21px; line-height: 1.65; }
 .message-content strong { display: block; margin-bottom: 10px; font-size: 21px; font-weight: 600; line-height: 1.2; }
 .message-content p { margin: 0; }
+.message-content > :not(strong) { margin: 0 0 16px; }
+.message-content > :last-child { margin-bottom: 0; }
+.message-content h1, .message-content h2, .message-content h3 { margin-top: 0; font-family: Georgia, "Times New Roman", serif; line-height: 1.2; }
+.message-content h1 { font-size: 1.5em; }.message-content h2 { font-size: 1.3em; }.message-content h3 { font-size: 1.15em; }
+.message-content ul, .message-content ol { padding-left: 1.4em; }
+.message-content li + li { margin-top: 5px; }
+.message-content code { padding: 0.12em 0.32em; border-radius: 4px; background: #edf1ef; font-family: "Cascadia Code", Consolas, monospace; font-size: 0.88em; }
+.message-content pre { padding: 16px; overflow-x: auto; border-radius: 7px; color: #edf6f1; background: #17231e; }.message-content pre code { padding: 0; background: transparent; color: inherit; }
+.message-content a { color: var(--green); text-decoration-thickness: 1px; text-underline-offset: 3px; }
 .message--user { align-self: flex-end; width: min(540px, 65%); padding: 31px 38px 28px; border-radius: 9px; background: var(--user-surface); }
 .message--user .message-content { padding: 0; }
 
@@ -70,6 +83,18 @@ button:focus-visible, textarea:focus-visible, select:focus-visible, summary:focu
 .send-button svg { width: 34px; height: 34px; }
 .send-button:disabled { cursor: not-allowed; opacity: 0.4; }
 .disclaimer { margin: 21px 0 0; color: #767a7c; font-size: 14px; text-align: center; }
+.request-error { position: fixed; z-index: 10; right: 20px; bottom: 20px; max-width: min(520px, calc(100vw - 40px)); padding: 12px 16px; margin: 0; border: 1px solid #d9a8a8; border-radius: 6px; color: #8a2323; background: #fff7f7; text-align: center; }
+.conversation-loading, .response-pending { align-self: center; padding: 12px 18px; margin: 16px auto; border-radius: 999px; color: var(--muted); background: var(--green-soft); }
+.settings-backdrop { position: fixed; z-index: 20; inset: 0; display: grid; padding: 24px; place-items: center; background: rgba(12, 22, 17, 0.35); }
+.settings-panel { width: min(560px, 100%); padding: 26px; border-radius: 10px; background: #fff; box-shadow: 0 18px 50px rgba(0, 0, 0, 0.2); }
+.settings-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.settings-heading h2 { margin: 0; font-family: Georgia, "Times New Roman", serif; font-weight: 400; }
+.settings-heading button { padding: 7px 11px; border: 1px solid var(--line); border-radius: 5px; background: #fff; cursor: pointer; }
+.settings-panel dl { display: grid; grid-template-columns: minmax(120px, 0.7fr) minmax(0, 1.3fr); gap: 13px 20px; margin: 25px 0; }
+.settings-model-label { display: block; margin: 18px 0 7px; font-weight: 600; }
+.settings-panel select, .settings-model-input { width: 100%; height: 42px; padding: 0 10px; border: 1px solid var(--line); border-radius: 5px; background: #fff; }
+.settings-model-input { margin-top: 10px; }
+.settings-panel dt { color: var(--muted); }.settings-panel dd { margin: 0; }.settings-note { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.5; }
 
 @media (max-width: 900px) {
   .app-shell { display: block; }
@@ -86,6 +111,8 @@ button:focus-visible, textarea:focus-visible, select:focus-visible, summary:focu
   .chat-main { grid-template-rows: auto minmax(300px, 1fr) auto; min-height: calc(100vh - 68px); }
   .conversation-header { align-items: center; padding: 28px 22px 18px; }
   .conversation-header h1 { font-size: 29px; }
+  .conversation-actions { gap: 12px; }
+  .delete-conversation { font-size: 13px; }
   .privacy-details summary { gap: 7px; font-size: 16px; }
   .privacy-details summary > svg:first-child { width: 20px; height: 20px; }
   .privacy-chevron { width: 18px; height: 18px; }

@@ -1,3 +1,4 @@
+import Markdown from 'react-markdown'
 import type { ChatMessage } from '../domain/chat'
 
 interface MessageListProps {
@@ -12,7 +13,19 @@ export function MessageList({ messages }: MessageListProps) {
           {message.author === 'assistant' ? <div className="assistant-avatar" aria-hidden="true">AI</div> : null}
           <div className="message-content">
             <strong>{message.author === 'assistant' ? 'Private Chat' : 'You'}</strong>
-            <p>{message.body}</p>
+            {message.author === 'assistant' ? (
+              <Markdown
+                components={{
+                  a: ({ href, children }) => (
+                    <a href={href} target="_blank" rel="noreferrer">
+                      {children}
+                    </a>
+                  ),
+                }}
+              >
+                {message.body}
+              </Markdown>
+            ) : <p>{message.body}</p>}
           </div>
         </li>
       ))}

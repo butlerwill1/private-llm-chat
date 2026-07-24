@@ -1,8 +1,8 @@
 # Private Chat on AWS
 
-Private Chat is a privacy-first personal chatbot starter built around an authenticated application tier, application-encrypted conversation storage and replaceable model backends. It supports a privacy-restricted OpenRouter adapter now and leaves a clean path to a privately networked GPU host later.
+Private Chat is a working privacy-first personal chatbot with application-encrypted conversation storage and replaceable model backends. Its private-GPU path runs a pre-built Ollama model on a private AWS EC2 GPU instance, starts that instance only for a session, and reaches it through an encrypted SSM tunnel with no public IP or model port. It also supports a privacy-restricted OpenRouter-only session through the same local web interface.
 
-This repository implements the initial engineering foundation from the [project brief](Private-AWS-Chatbot-Project-Brief.docx). It is deliberately not presented as production-ready: authentication, durable AWS adapters and a reviewed deployment configuration must be completed before sensitive use.
+This repository implements the engineering foundation from the [project brief](Private-AWS-Chatbot-Project-Brief.docx). It is designed for personal, loopback-only use. It is not a public multi-user deployment: authentication and authorisation would be required before exposing the API beyond the computer running it.
 
 ![Private Chat interface concept](docs/design/chat-screen-concept.png)
 
@@ -13,44 +13,48 @@ This repository implements the initial engineering foundation from the [project 
 - An OpenRouter adapter that always supplies ZDR, denies provider data collection, disables fallbacks and requires an allowlist.
 - A private self-hosted adapter for Ollama or vLLM-compatible endpoints.
 - AES-256-GCM envelope-encryption primitives and safe in-memory development adapters.
-- A React and TypeScript chat interface with accessible, responsive interactions.
+- A React and TypeScript chat interface connected to the typed FastAPI conversation API.
 - Terraform for private networking, KMS, encrypted conversation storage and an optional default-off GPU host.
 - An opt-in EC2 Image Builder pipeline that produces a tested, private Ollama GPU AMI from pinned and checksum-verified inputs.
 - An opt-in private S3 model landing bucket and script for staging a pinned, checksum-verified Hugging Face GGUF.
+- A personal-use SSM tunnel and shell workflow that starts and stops the private GPU without public management ports.
 - Provider-wide AWS cost tags for project, environment, owner, cost centre and repository reporting.
 - Automated unit, contract, lint, type, build and Terraform checks.
 - Architecture decisions, a threat model and operational runbooks.
 
+## Choose a session mode
+
+| Mode | Where inference runs | What you pay for while using it | When to use it |
+|---|---|---|---|
+| Private GPU | Ollama on the private AWS GPU, reached through an SSM tunnel | GPU compute and temporary SSM interface endpoints | You want prompts and inference to stay in your AWS environment. |
+| OpenRouter-only | An approved OpenRouter provider over HTTPS | OpenRouter usage only; do not start the GPU or SSM endpoints | You want a lightweight hosted-model session. |
+
+Both modes use the same React interface, FastAPI API and optional encrypted S3 conversation storage. The model selector in **Session settings** displays only the models enabled by the backend; an OpenRouter API key never reaches the browser.
+
+For a private GPU session, follow the [personal session runbook](ops/runbooks/personal-session.md). For OpenRouter-only mode, use the dedicated section in the same runbook.
+
 ## Architecture
 
-```text
-Browser
-  |
-  | HTTPS, authenticated
-  v
-Chat API and control plane
-  |---------------- encrypted conversation objects ----> S3 + KMS
-  |
-  |---------------- TLS ----> allowlisted OpenRouter endpoint
-  |
-  +---------------- private VPC traffic ----> GPU EC2
-                                               no public IP
-                                               no public model port
+```mermaid
+flowchart LR
+    Browser["Browser on your computer"] -->|"/v1 loopback proxy"| Vite["React and Vite"]
+    Vite --> API["FastAPI on 127.0.0.1:8000"]
+    API -->|"encrypted conversation objects"| Storage["S3 and KMS"]
+    API -->|"OpenRouter-only mode over TLS"| OpenRouter["Approved OpenRouter provider"]
+    API -->|"Private-GPU mode"| Tunnel["Local SSM tunnel on 127.0.0.1:11434"]
+    Tunnel --> GPU["Private EC2 GPU with Ollama"]
 ```
 
-The web interface does not connect directly to the GPU. Only the authenticated application entry point is exposed. The application can reach the model server over private VPC networking and remains available while the GPU is stopped.
+The browser never connects directly to the GPU or to OpenRouter. In private-GPU mode, the SSM tunnel makes Ollama appear locally at `127.0.0.1:11434`; FastAPI then talks to that loopback address. The GPU can be stopped between sessions without affecting stored conversations.
 
 The backend uses explicit dependency inversion:
 
-```text
-API and Pydantic schemas
-          |
-          v
-Application use cases ----> Protocol ports
-          |                       |
-          v                       v
-Domain rules              OpenRouter, Ollama/vLLM,
-                          encryption, storage and AWS adapters
+```mermaid
+flowchart TD
+    API["API and Pydantic schemas"] --> UseCases["Application use cases"]
+    UseCases --> Domain["Domain rules"]
+    UseCases --> Ports["Typed protocol ports"]
+    Ports --> Adapters["OpenRouter, Ollama or vLLM, encryption, storage and AWS adapters"]
 ```
 
 See [the architecture guide](docs/architecture.md) and [architecture decisions](docs/adr) for the reasoning behind these boundaries.
@@ -101,7 +105,11 @@ pnpm install --frozen-lockfile
 pnpm dev
 ```
 
-The interface starts with a local demonstration adapter. Configure the API base URL described in [the frontend guide](frontend/README.md) when connecting it to the backend.
+The interface calls the local FastAPI backend through Vite's same-origin `/v1`
+proxy. Follow the [personal session runbook](ops/runbooks/personal-session.md) to
+connect that backend to Ollama on the private GPU.
+
+Assistant responses support safe Markdown rendering for headings, lists, links and code blocks. Raw HTML is not rendered. Responses currently arrive once the model has completed generation; the interface shows a generation-in-progress message rather than streaming individual tokens.
 
 ### Terraform
 
@@ -111,7 +119,7 @@ Terraform defaults to no GPU instance. Read [the infrastructure guide](terraform
 cd terraform
 Copy-Item terraform.tfvars.example terraform.tfvars
 terraform init
-terraform plan -out=tfplan
+terraform plan -out tfplan
 ```
 
 Do not apply this example to an AWS account until its IAM, state backend, authentication path and cost controls have been reviewed for that account.
@@ -170,9 +178,10 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the working agreement.
 
 ## Current limitations
 
-- The included API has no production authentication or authorisation adapter.
-- Durable S3/KMS repository adapters are still to be implemented and integration-tested.
-- The GPU AMI factory is implemented, but model choice and licence acceptance, trusted artefact checksums, GPU quotas and regional availability remain deployment-specific decisions.
-- The image pipeline has not been executed against an AWS account from this repository; its first real build remains an explicit, chargeable deployment step.
-- The frontend uses demonstration data until connected to an authenticated API.
+- Personal mode relies on loopback-only FastAPI binding and local AWS identity; it is not a public authentication mechanism.
+- The S3/KMS adapters are unit-tested locally but still require integration testing in the target AWS account.
+- The GPU AMI factory and runtime session flow are implemented, but model choice and licence acceptance, trusted artefact checksums, GPU quotas and regional availability remain deployment-specific decisions.
+- Responses are not token-streamed. Long local generations display an in-progress state and have a bounded backend timeout.
+- GPU temperature, utilisation and VRAM usage are available through administrative commands such as `nvidia-smi`, not through the browser settings panel.
+- The local frontend uses the FastAPI conversation API; authentication is still required before exposing that API beyond the user's computer.
 - This application is not a substitute for professional, medical, legal, financial or emergency support.

@@ -23,9 +23,13 @@ phases:
                 --output /tmp/ollama-linux-amd64.tar.zst '${ollama_url}'
               echo '${ollama_sha256}  /tmp/ollama-linux-amd64.tar.zst' | sha256sum --check --strict
               command -v zstd >/dev/null
+              # The official archive contains bin/ollama. Extracting it beneath
+              # /usr therefore installs the executable at /usr/bin/ollama.
               tar --extract --zstd --file /tmp/ollama-linux-amd64.tar.zst --directory /usr
               rm --force /tmp/ollama-linux-amd64.tar.zst
-              /usr/local/bin/ollama --version | grep --fixed-strings '${ollama_version}'
+              # AWSTOE does not guarantee HOME for its root command process, while
+              # Ollama requires it even for a read-only version check.
+              HOME=/root /usr/bin/ollama --version | grep --fixed-strings '${ollama_version}'
       - name: ConfigureServiceAccount
         action: ExecuteBash
         timeoutSeconds: 120
@@ -43,17 +47,64 @@ phases:
                 /var/lib/ollama /var/lib/ollama/models
       - name: ConfigurePrivateService
         action: ExecuteBash
-        timeoutSeconds: 120
+        timeoutSeconds: 600
         onFailure: Abort
         inputs:
           commands:
             - |
               set -euo pipefail
+              # Ollama only performs GPU discovery when its service starts. On a
+              # fresh EC2 boot, systemd can reach this unit before the CUDA
+              # userspace stack is ready even though nvidia-smi works moments
+              # later. Probe Ollama's actual CUDA backend so the service cannot
+              # silently make a permanent CPU-only choice during that race.
+              install --directory --owner root --group root --mode 0755 \
+                /usr/local/libexec/private-llm-chat
+              tee /usr/local/libexec/private-llm-chat/wait-for-cuda >/dev/null <<'SCRIPT'
+              #!/usr/bin/env bash
+              set -u
+
+              readonly cuda_library_dir=/usr/lib/ollama/cuda_v12
+              readonly cuda_backend="$cuda_library_dir/libggml-cuda.so"
+              readonly max_attempts=8
+
+              for attempt in $(seq 1 "$max_attempts"); do
+                echo "CUDA readiness probe $attempt/$max_attempts"
+                nvidia-smi --query-gpu=name,driver_version --format=csv,noheader || true
+
+                if output=$(timeout --signal=TERM 30s env \
+                  HOME=/var/lib/ollama \
+                  LD_LIBRARY_PATH="/usr/lib/ollama:$cuda_library_dir" \
+                  GGML_BACKEND_PATH="$cuda_backend" \
+                  /usr/lib/ollama/llama-server --list-devices 2>&1); then
+                  printf '%s\n' "$output"
+                  if printf '%s\n' "$output" \
+                    | grep --extended-regexp --quiet '^[[:space:]]+CUDA[0-9]+:'; then
+                    echo 'Ollama CUDA backend is ready.'
+                    exit 0
+                  fi
+                else
+                  probe_exit=$?
+                  printf '%s\n' "$output"
+                  echo "CUDA readiness probe exited $probe_exit."
+                fi
+
+                sleep 5
+              done
+
+              echo 'Ollama CUDA backend did not become ready before the bounded retry limit.' >&2
+              exit 1
+              SCRIPT
+              chmod 0755 /usr/local/libexec/private-llm-chat/wait-for-cuda
+
               tee /etc/systemd/system/ollama.service >/dev/null <<'UNIT'
               [Unit]
               Description=Ollama private inference service
               After=network-online.target
               Wants=network-online.target
+              # A transiently slow GPU initialisation must not exhaust systemd's
+              # default start-rate limit and leave inference offline.
+              StartLimitIntervalSec=0
 
               [Service]
               Type=simple
@@ -63,7 +114,17 @@ phases:
               Environment=OLLAMA_HOST=0.0.0.0:11434
               Environment=OLLAMA_MODELS=/var/lib/ollama/models
               Environment=OLLAMA_NO_CLOUD=1
-              ExecStart=/usr/local/bin/ollama serve
+              # The pinned Ollama release includes CUDA 12 and CUDA 13 runners.
+              # Force the broadly compatible CUDA 12 runner because automatic
+              # GPU discovery can time out on an otherwise healthy NVIDIA T4.
+              # This is Ollama's documented fallback when autodetection fails.
+              Environment=OLLAMA_LLM_LIBRARY=cuda_v12
+              # Loading a model for the first time can be slower on a newly
+              # created AMI. Match this server-side limit to the bounded test.
+              Environment=OLLAMA_LOAD_TIMEOUT=30m
+              ExecStartPre=/usr/local/libexec/private-llm-chat/wait-for-cuda
+              ExecStart=/usr/bin/ollama serve
+              TimeoutStartSec=10m
               Restart=on-failure
               RestartSec=5
               NoNewPrivileges=true
@@ -82,7 +143,7 @@ phases:
               UNIT
               systemctl daemon-reload
               systemctl enable --now ollama.service
-              for attempt in $(seq 1 60); do
+              for attempt in $(seq 1 240); do
                 if curl --fail --silent http://127.0.0.1:11434/api/tags >/dev/null; then exit 0; fi
                 sleep 2
               done
@@ -106,7 +167,7 @@ phases:
               chown ollama:ollama /var/lib/ollama/import/model.gguf
               printf 'FROM /var/lib/ollama/import/model.gguf\n' >/var/lib/ollama/import/Modelfile
               chown ollama:ollama /var/lib/ollama/import/Modelfile
-              sudo --user ollama HOME=/var/lib/ollama /usr/local/bin/ollama create \
+              sudo --user ollama HOME=/var/lib/ollama /usr/bin/ollama create \
                 '${model_name}' --file /var/lib/ollama/import/Modelfile
               rm --force /var/lib/ollama/import/model.gguf /var/lib/ollama/import/Modelfile
               rmdir /var/lib/ollama/import
@@ -123,6 +184,8 @@ phases:
               {
                 "ollama_version": "${ollama_version}",
                 "ollama_sha256": "${ollama_sha256}",
+                "ollama_llm_library": "cuda_v12",
+                "gpu_readiness_probe": "llama-server --list-devices",
                 "model_configured": ${model_enabled},
                 "model_name": "${model_name}",
                 "model_sha256": "${model_sha256}"
@@ -139,7 +202,10 @@ phases:
           commands:
             - systemctl is-enabled --quiet ollama.service
             - systemctl is-active --quiet ollama.service
-            - /usr/local/bin/ollama --version | grep --fixed-strings '${ollama_version}'
+            - HOME=/root /usr/bin/ollama --version | grep --fixed-strings '${ollama_version}'
             - curl --fail --silent http://127.0.0.1:11434/api/tags >/dev/null
             - nvidia-smi --query-gpu=name,driver_version --format=csv,noheader
+            - systemctl show ollama.service --property Environment --value | grep --fixed-strings --quiet 'OLLAMA_LLM_LIBRARY=cuda_v12'
+            - systemctl show ollama.service --property ExecStartPre --value | grep --fixed-strings --quiet '/usr/local/libexec/private-llm-chat/wait-for-cuda'
+            - journalctl --unit ollama.service --no-pager | grep --extended-regexp --quiet 'inference compute.*library=CUDA'
             - test -r /etc/private-llm-chat/image-build.json

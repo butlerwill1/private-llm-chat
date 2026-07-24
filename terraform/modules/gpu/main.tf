@@ -82,6 +82,38 @@ resource "aws_instance" "gpu" {
   iam_instance_profile                 = aws_iam_instance_profile.gpu.name
   monitoring                           = true
   instance_initiated_shutdown_behavior = "stop"
+  user_data_replace_on_change          = true
+
+  # This watchdog runs on the instance, so it still stops chargeable compute if
+  # the user's terminal, network or laptop disappears during a session.
+  user_data = <<-CLOUD_INIT
+    #cloud-config
+    write_files:
+      - path: /etc/systemd/system/private-chat-autostop.service
+        permissions: '0644'
+        content: |
+          [Unit]
+          Description=Stop private chat GPU after its maximum session time
+
+          [Service]
+          Type=oneshot
+          ExecStart=/sbin/shutdown -h now
+      - path: /etc/systemd/system/private-chat-autostop.timer
+        permissions: '0644'
+        content: |
+          [Unit]
+          Description=Hard cost-safety timer for the private chat GPU
+
+          [Timer]
+          OnBootSec=${var.max_runtime_minutes}min
+          Unit=private-chat-autostop.service
+
+          [Install]
+          WantedBy=timers.target
+    runcmd:
+      - [systemctl, daemon-reload]
+      - [systemctl, enable, --now, private-chat-autostop.timer]
+  CLOUD_INIT
 
   metadata_options {
     http_endpoint               = "enabled"
@@ -103,7 +135,7 @@ resource "aws_instance" "gpu" {
     Name         = "${var.name}-gpu"
     Role         = "private-inference"
     ControlScope = var.name
-    AutoStop     = "true"
+    AutoStop     = "systemd-${var.max_runtime_minutes}m"
   }
 
   # Root EBS volumes are created indirectly by aws_instance, so pass the cost

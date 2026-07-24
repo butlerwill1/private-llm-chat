@@ -5,46 +5,153 @@ phases:
   - name: test
     steps:
       - name: TestNvidiaRuntime
+        # Fail the AMI build unless EC2 exposes at least one usable NVIDIA GPU.
+        # The second command records hardware and driver provenance in build logs.
         action: ExecuteBash
+        # Image Builder aborts this step if its commands exceed two minutes.
         timeoutSeconds: 120
+        # A failed prerequisite must reject the AMI rather than continue testing.
         onFailure: Abort
         inputs:
           commands:
+            # Command substitution counts lines beginning "GPU "; test -ge 1
+            # exits non-zero when the driver exposes no GPU to the operating system.
             - test "$(nvidia-smi --list-gpus | grep --count '^GPU ')" -ge 1
+            # Print useful diagnostic values into the Image Builder execution log.
             - nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv,noheader
+            # Exercise the same bundled CUDA backend that Ollama will use. This
+            # catches a driver/library mismatch before paying for a model load.
+            - timeout 60s env HOME=/root LD_LIBRARY_PATH=/usr/lib/ollama:/usr/lib/ollama/cuda_v12 GGML_BACKEND_PATH=/usr/lib/ollama/cuda_v12/libggml-cuda.so /usr/lib/ollama/llama-server --list-devices | tee /tmp/ollama-cuda-devices
+            - grep --extended-regexp --quiet '^[[:space:]]+CUDA[0-9]+:' /tmp/ollama-cuda-devices
       - name: TestOllamaService
+        # Confirm systemd will start Ollama after future boots, then allow up to
+        # eight minutes for the bounded CUDA readiness probe and loopback health
+        # endpoint. Normal boots complete much sooner.
         action: ExecuteBash
-        timeoutSeconds: 300
+        timeoutSeconds: 600
         onFailure: Abort
         inputs:
           commands:
             - |
+              # -e stops on errors, -u rejects unset variables, and pipefail makes
+              # any failed command in a pipeline fail the whole script block.
               set -euo pipefail
+              # Image Builder's command runner may omit HOME. Ollama reads it
+              # during CLI initialisation even when the CLI only calls its API.
+              export HOME=/root
+              # Verify the unit is configured to start automatically on EC2 boot.
               systemctl is-enabled --quiet ollama.service
-              for attempt in $(seq 1 60); do
+              # Poll once every two seconds while the pre-start CUDA probe and
+              # Ollama initialise. A successful curl breaks the loop early.
+              for attempt in $(seq 1 240); do
                 if curl --fail --silent http://127.0.0.1:11434/api/tags >/dev/null; then break; fi
                 sleep 2
               done
+              # Confirm the process is running now, independently of being enabled.
               systemctl is-active --quiet ollama.service
-              /usr/local/bin/ollama --version | grep --fixed-strings '${ollama_version}'
+              # Exact version matching prevents an unreviewed Ollama upgrade from
+              # being distributed merely because some executable is installed.
+              /usr/bin/ollama --version | grep --fixed-strings '${ollama_version}'
+              # The CUDA override is intentional: it bypasses an observed
+              # automatic-discovery timeout while retaining real GPU validation
+              # in the end-to-end inference test below.
+              systemctl show ollama.service --property Environment --value \
+                | grep --fixed-strings --quiet 'OLLAMA_LLM_LIBRARY=cuda_v12'
+              # Fail before the expensive cold model read if Ollama somehow
+              # selected CPU despite the readiness gate.
+              if ! journalctl --unit ollama.service --no-pager \
+                | grep --extended-regexp --quiet 'inference compute.*library=CUDA'; then
+                echo 'Ollama did not select CUDA during service startup.' >&2
+                systemctl status ollama.service --no-pager >&2 || true
+                journalctl --unit ollama.service --no-pager --lines 250 >&2 || true
+                nvidia-smi >&2 || true
+                exit 1
+              fi
+              # Make one final required health call; --fail turns HTTP 4xx/5xx into
+              # a non-zero exit and /dev/null discards the response body.
               curl --fail --silent http://127.0.0.1:11434/api/tags >/dev/null
       - name: TestGpuInference
+        # Service-only images legitimately omit a model. When a verified model is
+        # configured, however, the build must prove an end-to-end GPU generation.
         action: ExecuteBash
-        timeoutSeconds: 1800
+        timeoutSeconds: 2700
         onFailure: Abort
         inputs:
           commands:
             - |
               set -euo pipefail
+              # Give the Ollama client a deterministic home in AWSTOE's otherwise
+              # minimal command environment.
+              export HOME=/root
+              # Terraform renders model_enabled into this template. Exit success
+              # when the AMI deliberately contains only Ollama and no baked model.
               if [ '${model_enabled}' != 'true' ]; then
                 echo 'No model configured; NVIDIA and service tests passed, inference test skipped.'
                 exit 0
               fi
-              /usr/local/bin/ollama show '${model_name}' >/dev/null
-              response=$(curl --fail --silent --show-error --max-time 1200 \
+              # `ollama show` fails if the configured imported model is absent.
+              /usr/bin/ollama show '${model_name}' >/dev/null
+              # Store the response body separately from the HTTP status. The
+              # previous --fail invocation discarded Ollama's useful JSON error.
+              response_file=$(mktemp)
+              cleanup() { rm --force "$response_file"; }
+              trap cleanup EXIT
+
+              # Print enough machine and service state to explain an inference
+              # failure without retaining the temporary test instance.
+              print_diagnostics() {
+                echo '--- Ollama response body ---' >&2
+                if [ -s "$response_file" ]; then
+                  cat "$response_file" >&2
+                else
+                  echo '(empty response body)' >&2
+                fi
+                echo '--- Ollama service status ---' >&2
+                systemctl status ollama.service --no-pager >&2 || true
+                echo '--- Ollama service journal ---' >&2
+                journalctl --unit ollama.service --no-pager --lines 250 >&2 || true
+                echo '--- NVIDIA GPU state ---' >&2
+                nvidia-smi >&2 || true
+                echo '--- Ollama process state ---' >&2
+                /usr/bin/ollama ps >&2 || true
+                echo '--- System memory and storage ---' >&2
+                free --human >&2 || true
+                df --human / /var/lib/ollama >&2 || true
+              }
+
+              # Keep the probe deliberately small and deterministic. Qwen's
+              # extended thinking is disabled and only eight tokens are allowed.
+              set +e
+              http_code=$(curl --silent --show-error --max-time 2400 \
+                --output "$response_file" --write-out '%%{http_code}' \
                 http://127.0.0.1:11434/api/generate \
                 --header 'Content-Type: application/json' \
-                --data-binary '{"model":"${model_name}","prompt":"Reply with the word ready.","stream":false}')
-              printf '%s' "$response" | grep --extended-regexp --quiet '"done"[[:space:]]*:[[:space:]]*true'
-              /usr/local/bin/ollama ps
-              /usr/local/bin/ollama ps | grep --extended-regexp --quiet '[1-9][0-9]*% GPU|100% GPU'
+                --data-binary '{"model":"${model_name}","prompt":"Reply with the word ready.","stream":false,"think":false,"options":{"num_ctx":2048,"num_predict":8,"temperature":0}}')
+              curl_exit=$?
+              set -e
+              if [ "$curl_exit" -ne 0 ] || [ "$http_code" != '200' ]; then
+                echo "Inference request failed: curl exit $curl_exit, HTTP $http_code" >&2
+                print_diagnostics
+                exit 1
+              fi
+
+              # Load the successful non-streaming JSON response for assertions.
+              response=$(cat "$response_file")
+              # printf avoids shell-specific echo escaping. grep exits non-zero unless
+              # the JSON contains Ollama's completed-generation marker.
+              if ! printf '%s' "$response" | grep --extended-regexp --quiet '"done"[[:space:]]*:[[:space:]]*true'; then
+                echo 'Inference response did not contain a completed-generation marker.' >&2
+                print_diagnostics
+                exit 1
+              fi
+              # Ollama's process report must attribute a non-zero percentage to
+              # the GPU; CPU-only success would defeat the purpose of this AMI.
+              # Capture it once so the displayed and asserted values are identical.
+              process_report=$(/usr/bin/ollama ps)
+              printf '%s\n' "$process_report"
+              if ! printf '%s\n' "$process_report" \
+                | grep --extended-regexp --quiet '[1-9][0-9]*% GPU|100% GPU'; then
+                echo 'Inference completed without a non-zero GPU allocation.' >&2
+                print_diagnostics
+                exit 1
+              fi

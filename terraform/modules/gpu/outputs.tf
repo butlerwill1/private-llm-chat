@@ -8,3 +8,7 @@ output "instance_arn" {
   description = "Inference instance ARN."
 }
 
+output "instance_id" {
+  value       = aws_instance.gpu.id
+  description = "Inference instance ID used by EC2 and Systems Manager commands."
+}

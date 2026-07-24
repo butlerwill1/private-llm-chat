@@ -19,6 +19,11 @@ variable "root_volume_gib" {
   description = "Root EBS size."
 }
 
+variable "max_runtime_minutes" {
+  type        = number
+  description = "Maximum runtime after boot before the instance stops itself."
+}
+
 variable "kms_key_arn" {
   type        = string
   description = "KMS key for EBS encryption."

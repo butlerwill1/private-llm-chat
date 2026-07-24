@@ -1,6 +1,8 @@
+import asyncio
 from dataclasses import dataclass
 from uuid import UUID
 
+from private_chat.application.conversations import message_context
 from private_chat.domain.models import ChatMessage, ModelRequest, Role, StoredMessage
 from private_chat.ports.interfaces import ConversationRepository, EnvelopeEncryptor, ModelClient
 
@@ -9,7 +11,7 @@ from private_chat.ports.interfaces import ConversationRepository, EnvelopeEncryp
 class SendMessageCommand:
     conversation_id: UUID
     content: str
-    model: str
+    model_id: str | None = None
 
 
 class SendMessage:
@@ -20,18 +22,16 @@ class SendMessage:
         repository: ConversationRepository,
         encryptor: EnvelopeEncryptor,
         model_client: ModelClient,
+        model_name: str,
     ) -> None:
         self._repository = repository
         self._encryptor = encryptor
         self._model_client = model_client
-
-    @staticmethod
-    def _context(conversation_id: UUID, message_id: UUID) -> bytes:
-        # Binding ciphertext to both identifiers prevents it being copied into another
-        # conversation or record and successfully decrypted there.
-        return f"conversation={conversation_id};message={message_id}".encode()
+        self._model_name = model_name
 
     async def execute(self, command: SendMessageCommand) -> ChatMessage:
+        if await self._repository.get_conversation(command.conversation_id) is None:
+            raise KeyError("Conversation does not exist")
         user = ChatMessage.create(Role.USER, command.content)
         history_records = await self._repository.list_messages(command.conversation_id)
         history = tuple(
@@ -39,7 +39,7 @@ class SendMessage:
                 role=item.role,
                 content=self._encryptor.decrypt(
                     item.encrypted_content,
-                    context=self._context(command.conversation_id, item.id),
+                    context=message_context(command.conversation_id, item.id),
                 ).decode(),
                 id=item.id,
                 created_at=item.created_at,
@@ -47,24 +47,25 @@ class SendMessage:
             for item in history_records
         )
         response = await self._model_client.generate(
-            ModelRequest(messages=(*history, user), model=command.model)
+            ModelRequest(messages=(*history, user), model=command.model_id or self._model_name)
         )
         assistant = ChatMessage.create(Role.ASSISTANT, response.content)
 
-        def stored(message: ChatMessage) -> StoredMessage:
+        async def stored(message: ChatMessage) -> StoredMessage:
             return StoredMessage(
                 id=message.id,
                 conversation_id=command.conversation_id,
                 role=message.role,
-                encrypted_content=self._encryptor.encrypt(
+                encrypted_content=await asyncio.to_thread(
+                    self._encryptor.encrypt,
                     message.content.encode(),
-                    context=self._context(command.conversation_id, message.id),
+                    context=message_context(command.conversation_id, message.id),
                 ),
                 created_at=message.created_at,
             )
 
         # The repository owns atomicity: a failed write must not leave a one-sided turn.
         await self._repository.append_turn(
-            command.conversation_id, stored(user), stored(assistant)
+            command.conversation_id, await stored(user), await stored(assistant)
         )
         return assistant

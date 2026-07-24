@@ -20,6 +20,28 @@ class Role(StrEnum):
 
 
 @dataclass(frozen=True, slots=True)
+class Conversation:
+    """Stable metadata for one encrypted transcript.
+
+    Titles are intentionally generic in the initial application so potentially
+    sensitive message content is not copied into plaintext S3 object metadata.
+    """
+
+    id: UUID
+    title: str
+    created_at: datetime
+
+    @classmethod
+    def create(cls, title: str = "New conversation") -> "Conversation":
+        """Create a conversation after enforcing the domain's title invariant."""
+
+        cleaned_title = title.strip()
+        if not cleaned_title:
+            raise ValueError("Conversation title must not be blank")
+        return cls(id=uuid4(), title=cleaned_title, created_at=datetime.now(UTC))
+
+
+@dataclass(frozen=True, slots=True)
 class ChatMessage:
     """One plaintext message while it is being processed in trusted memory.
 

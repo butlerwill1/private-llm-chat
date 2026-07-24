@@ -7,8 +7,15 @@ cost_center  = "personal-ai"
 # GPU resources are deliberately opt-in. Use a hardened pre-baked AMI because
 # the isolated subnet has no general internet egress.
 enable_gpu       = false
+gpu_max_runtime_minutes = 120
 gpu_ami_id       = null
 gpu_instance_type = "g6.xlarge"
+
+# Private SSM endpoints are charged while provisioned. For personal use, enable
+# them before a shell/tunnel session and disable them after stopping the GPU.
+enable_ssm_endpoints      = false
+ssm_endpoint_subnet_count = 1
+ssm_endpoint_services     = ["ssm", "ssmmessages"]
 
 # The AMI factory is also opt-in. Use an AWS-owned GPU DLAMI pinned by AMI ID
 # and the release-published Ollama SHA-256.

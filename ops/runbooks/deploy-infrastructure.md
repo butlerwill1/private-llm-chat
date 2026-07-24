@@ -12,7 +12,7 @@
 1. From `terraform/`, copy `terraform.tfvars.example` to `terraform.tfvars` and
    adjust non-secret settings.
 2. Run `terraform fmt -check -recursive` and `terraform validate`.
-3. Run `terraform plan -out=tfplan`. Review every create, update and delete,
+3. Run `terraform plan -out tfplan`. Review every create, update and delete,
    paying particular attention to IAM, routing, security groups, KMS and S3.
 4. Apply the reviewed file with `terraform apply tfplan`.
 5. Record the deployment reference and outputs in the approved operations system.

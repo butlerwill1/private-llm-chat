@@ -46,8 +46,11 @@ resource "aws_internet_gateway" "build" {
 }
 
 resource "aws_subnet" "build" {
-  vpc_id                  = aws_vpc.build.id
-  cidr_block              = "10.253.0.0/25"
+  vpc_id     = aws_vpc.build.id
+  cidr_block = "10.253.0.0/25"
+  # Pinning is optional because zonal GPU capacity can vary. A deployment may
+  # select another AZ without changing the build VPC's address plan.
+  availability_zone       = var.build_availability_zone
   map_public_ip_on_launch = true
 
   tags = merge(var.tags, { Name = "${var.name}-image-build" })
@@ -106,7 +109,9 @@ resource "aws_security_group" "build" {
 }
 
 resource "aws_s3_bucket" "logs" {
-  bucket_prefix = "${var.name}-image-build-logs-"
+  # S3 reserves room for Terraform's generated suffix, so bucket_prefix must be
+  # no longer than 37 characters. "ib" keeps the purpose clear within that limit.
+  bucket_prefix = "${var.name}-ib-logs-"
   force_destroy = false
   tags          = var.tags
 }
@@ -383,8 +388,13 @@ resource "aws_imagebuilder_distribution_configuration" "gpu" {
     region = var.aws_region
     ami_distribution_configuration {
       name        = "${var.name}-gpu-{{ imagebuilder:buildDate }}"
-      description = "Tested private Ollama GPU image"
-      ami_tags    = merge(var.tags, { ImageStatus = "approved", Role = "private-inference" })
+      description = "Private Ollama GPU image candidate; approval requires the SSM parameter"
+      # Image Builder creates the AMI before its test phase. Calling it approved
+      # here would leave a misleading tag on an AMI whose tests later fail.
+      ami_tags = merge(var.tags, {
+        ImageStatus = "candidate"
+        Role        = "private-inference"
+      })
     }
 
     ssm_parameter_configuration {
