@@ -58,7 +58,36 @@ function Invoke-AwsJson {
     return ($output | ConvertFrom-Json)
 }
 
+function Initialize-SessionManagerPlugin {
+    <#
+    Makes the AWS Session Manager plugin visible to this process.
+
+    The official Windows installer normally updates PATH only for new shells.
+    Resolving its standard installation location keeps a just-installed plugin
+    usable immediately, while still producing a clear error if it is absent.
+    #>
+    $pluginCommand = Get-Command -Name 'session-manager-plugin' -ErrorAction SilentlyContinue
+    if ($pluginCommand) {
+        return
+    }
+
+    $pluginDirectory = Join-Path $env:ProgramFiles 'Amazon\SessionManagerPlugin\bin'
+    $pluginPath = Join-Path $pluginDirectory 'session-manager-plugin.exe'
+    if (-not (Test-Path -LiteralPath $pluginPath -PathType Leaf)) {
+        throw @"
+The AWS Session Manager plugin is required for private shells and port forwarding.
+Install it from the official AWS documentation, then run this script again.
+"@
+    }
+
+    # AWS CLI discovers the plugin by executable name, so prepend the verified
+    # official installation directory only for this script's child processes.
+    $env:Path = "$pluginDirectory;$env:Path"
+    $null = Get-Command -Name 'session-manager-plugin' -ErrorAction Stop
+}
+
 $null = Get-Command -Name 'aws' -ErrorAction Stop
+Initialize-SessionManagerPlugin
 $instance = Invoke-AwsJson -Arguments @(
     'ec2', 'describe-instances', '--instance-ids', $InstanceId, '--output', 'json'
 )
