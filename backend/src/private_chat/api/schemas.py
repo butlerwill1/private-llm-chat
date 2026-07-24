@@ -11,7 +11,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 from private_chat.application.conversations import ConversationView
-from private_chat.domain.models import ChatMessage, Role
+from private_chat.domain.models import ChatMessage, Conversation, Role
 
 
 class SendMessageRequest(BaseModel):
@@ -58,6 +58,22 @@ class ConversationResponse(BaseModel):
             title=view.conversation.title,
             created_at=view.conversation.created_at,
             messages=tuple(MessageResponse.from_domain(message) for message in view.messages),
+        )
+
+
+class ConversationSummaryResponse(BaseModel):
+    """Metadata required for navigation, intentionally excluding messages."""
+
+    id: UUID
+    title: str
+    created_at: datetime
+
+    @classmethod
+    def from_domain(cls, conversation: Conversation) -> "ConversationSummaryResponse":
+        return cls(
+            id=conversation.id,
+            title=conversation.title,
+            created_at=conversation.created_at,
         )
 
 

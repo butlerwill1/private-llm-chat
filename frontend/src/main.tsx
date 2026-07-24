@@ -9,10 +9,13 @@ const api = new HttpChatApi()
 async function bootstrap() {
   const root = createRoot(document.getElementById('root')!)
   try {
-    const initialConversations = await api.listConversations()
+    const summaries = await api.listConversationSummaries()
+    const firstConversation = summaries[0]
+      ? await api.getConversation(summaries[0].id)
+      : null
     root.render(
       <StrictMode>
-        <App api={api} initialConversations={initialConversations} />
+        <App api={api} initialConversations={firstConversation ? [firstConversation] : []} initialSummaries={summaries} />
       </StrictMode>,
     )
   } catch (caught) {

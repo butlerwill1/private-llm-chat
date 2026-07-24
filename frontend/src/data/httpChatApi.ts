@@ -1,4 +1,4 @@
-import type { ChatApi, ChatMessage, Conversation, SendMessageRequest } from '../domain/chat'
+import type { ChatApi, ChatMessage, Conversation, ConversationSummary, SendMessageRequest } from '../domain/chat'
 
 interface ApiMessage {
   readonly id: string
@@ -10,6 +10,11 @@ interface ApiConversation {
   readonly id: string
   readonly title: string
   readonly messages: readonly ApiMessage[]
+}
+
+interface ApiConversationSummary {
+  readonly id: string
+  readonly title: string
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -69,6 +74,25 @@ export class HttpChatApi implements ChatApi {
       throw new Error('The chat API returned an invalid conversation list.')
     }
     return value.map((item) => toDomain(parseConversation(item)))
+  }
+
+  async listConversationSummaries(): Promise<readonly ConversationSummary[]> {
+    const value = await readJson(await fetch(`${this.baseUrl}/conversation-summaries`))
+    if (!Array.isArray(value) || value.some((item) => !isRecord(item)
+      || typeof item.id !== 'string' || typeof item.title !== 'string')) {
+      throw new Error('The chat API returned an invalid conversation summary list.')
+    }
+    return value.map((item) => {
+      const summary = item as ApiConversationSummary
+      return { id: summary.id, title: summary.title }
+    })
+  }
+
+  async getConversation(conversationId: string): Promise<Conversation> {
+    const value = await readJson(await fetch(
+      `${this.baseUrl}/conversations/${encodeURIComponent(conversationId)}`,
+    ))
+    return toDomain(parseConversation(value))
   }
 
   async createConversation(): Promise<Conversation> {

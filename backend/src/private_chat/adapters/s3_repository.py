@@ -172,12 +172,29 @@ class S3ConversationRepository:
                     request["ContinuationToken"] = continuation_token
                 page = self._client.list_objects_v2(**request)
                 for item in page.get("Contents", []):
+                    # Titles are currently fixed by the domain factory. S3's listing
+                    # already contains the object key and modification time, so the
+                    # navigation sidebar can avoid fetching or decrypting every
+                    # transcript merely to display a list of conversations.
                     object_id = UUID(
                         str(item["Key"]).removeprefix(self._prefix).removesuffix(".json")
                     )
-                    result = self._get(object_id)
-                    if result is not None:
-                        conversations.append(result[0].conversation())
+                    last_modified = item.get("LastModified")
+                    if isinstance(last_modified, datetime):
+                        conversations.append(
+                            Conversation(
+                                id=object_id,
+                                title="New conversation",
+                                created_at=last_modified,
+                            )
+                        )
+                    else:
+                        # Lightweight test doubles may omit S3's standard
+                        # LastModified field; retain compatibility while real
+                        # S3 avoids this fallback network read.
+                        result = self._get(object_id)
+                        if result is not None:
+                            conversations.append(result[0].conversation())
                 if not page.get("IsTruncated"):
                     break
                 continuation_token = str(page["NextContinuationToken"])

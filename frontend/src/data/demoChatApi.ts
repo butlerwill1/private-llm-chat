@@ -1,4 +1,4 @@
-import type { ChatApi, Conversation, SendMessageRequest } from '../domain/chat'
+import type { ChatApi, Conversation, ConversationSummary, SendMessageRequest } from '../domain/chat'
 
 const starterConversations: readonly Conversation[] = [
   {
@@ -41,6 +41,16 @@ export class DemoChatApi implements ChatApi {
 
   async listConversations(): Promise<readonly Conversation[]> {
     return Promise.resolve(this.conversations)
+  }
+
+  async listConversationSummaries(): Promise<readonly ConversationSummary[]> {
+    return this.conversations.map(({ id, title }) => ({ id, title }))
+  }
+
+  async getConversation(conversationId: string): Promise<Conversation> {
+    const conversation = this.conversations.find(({ id }) => id === conversationId)
+    if (!conversation) throw new Error('The selected conversation could not be found.')
+    return conversation
   }
 
   async createConversation(): Promise<Conversation> {

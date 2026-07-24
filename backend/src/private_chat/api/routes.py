@@ -4,7 +4,12 @@ from uuid import UUID
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 
-from private_chat.api.schemas import ConversationResponse, HealthResponse, SendMessageRequest
+from private_chat.api.schemas import (
+    ConversationResponse,
+    ConversationSummaryResponse,
+    HealthResponse,
+    SendMessageRequest,
+)
 from private_chat.application.conversations import ConversationService
 from private_chat.application.send_message import SendMessage, SendMessageCommand
 
@@ -30,6 +35,18 @@ async def list_conversations(
 ) -> tuple[ConversationResponse, ...]:
     views = await service.list()
     return tuple(ConversationResponse.from_view(view) for view in views)
+
+
+@router.get("/conversation-summaries", response_model=tuple[ConversationSummaryResponse, ...])
+async def list_conversation_summaries(
+    service: Annotated[ConversationService, Depends(get_conversations)],
+) -> tuple[ConversationSummaryResponse, ...]:
+    """Return navigation metadata without loading encrypted message content."""
+
+    return tuple(
+        ConversationSummaryResponse.from_domain(conversation)
+        for conversation in await service.list_metadata()
+    )
 
 
 @router.post(

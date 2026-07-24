@@ -75,6 +75,14 @@ button:focus-visible, textarea:focus-visible, select:focus-visible, summary:focu
 .send-button:disabled { cursor: not-allowed; opacity: 0.4; }
 .disclaimer { margin: 21px 0 0; color: #767a7c; font-size: 14px; text-align: center; }
 .request-error { position: fixed; z-index: 10; right: 20px; bottom: 20px; max-width: min(520px, calc(100vw - 40px)); padding: 12px 16px; margin: 0; border: 1px solid #d9a8a8; border-radius: 6px; color: #8a2323; background: #fff7f7; text-align: center; }
+.conversation-loading, .response-pending { align-self: center; padding: 12px 18px; margin: 16px auto; border-radius: 999px; color: var(--muted); background: var(--green-soft); }
+.settings-backdrop { position: fixed; z-index: 20; inset: 0; display: grid; padding: 24px; place-items: center; background: rgba(12, 22, 17, 0.35); }
+.settings-panel { width: min(560px, 100%); padding: 26px; border-radius: 10px; background: #fff; box-shadow: 0 18px 50px rgba(0, 0, 0, 0.2); }
+.settings-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.settings-heading h2 { margin: 0; font-family: Georgia, "Times New Roman", serif; font-weight: 400; }
+.settings-heading button { padding: 7px 11px; border: 1px solid var(--line); border-radius: 5px; background: #fff; cursor: pointer; }
+.settings-panel dl { display: grid; grid-template-columns: minmax(120px, 0.7fr) minmax(0, 1.3fr); gap: 13px 20px; margin: 25px 0; }
+.settings-panel dt { color: var(--muted); }.settings-panel dd { margin: 0; }.settings-note { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.5; }
 
 @media (max-width: 900px) {
   .app-shell { display: block; }

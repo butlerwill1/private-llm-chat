@@ -70,5 +70,15 @@ class ConversationService:
                 views.append(view)
         return tuple(views)
 
+    async def list_metadata(self) -> tuple[Conversation, ...]:
+        """Return sidebar-safe metadata without decrypting every transcript.
+
+        Loading a sidebar must not make one KMS decrypt request per historical
+        message. Callers fetch the selected conversation separately when its
+        transcript is actually needed.
+        """
+
+        return tuple(await self._repository.list_conversations())
+
     async def delete(self, conversation_id: UUID) -> bool:
         return await self._repository.delete_conversation(conversation_id)

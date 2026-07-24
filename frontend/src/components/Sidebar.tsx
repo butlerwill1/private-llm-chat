@@ -1,16 +1,17 @@
-import type { Conversation } from '../domain/chat'
+import type { ConversationSummary } from '../domain/chat'
 import { LockIcon, MenuIcon, MessageIcon, PlusCircleIcon, SettingsIcon } from './Icons'
 
 interface SidebarProps {
-  readonly conversations: readonly Conversation[]
+  readonly conversations: readonly ConversationSummary[]
   readonly selectedId: string
   readonly isOpen: boolean
   readonly onToggle: () => void
   readonly onNewConversation: () => void
   readonly onSelectConversation: (id: string) => void
+  readonly onSettings: () => void
 }
 
-export function Sidebar({ conversations, selectedId, isOpen, onToggle, onNewConversation, onSelectConversation }: SidebarProps) {
+export function Sidebar({ conversations, selectedId, isOpen, onToggle, onNewConversation, onSelectConversation, onSettings }: SidebarProps) {
   return (
     <aside className={isOpen ? 'sidebar sidebar--open' : 'sidebar'} aria-label="Chat navigation">
       <div className="brand-row">
@@ -44,7 +45,7 @@ export function Sidebar({ conversations, selectedId, isOpen, onToggle, onNewConv
           </ul>
         </nav>
         <div className="sidebar-divider" />
-        <button className="settings-button" type="button">
+        <button className="settings-button" type="button" onClick={onSettings}>
           <SettingsIcon />
           Settings
         </button>

@@ -20,9 +20,13 @@ async function renderApp() {
   // App expects its initial data as a prop, just as main.tsx loads data before
   // first render. `await` unwraps the Promise returned by the API interface.
   const conversations = await api.listConversations()
+  const summaries = await api.listConversationSummaries()
   // userEvent.setup returns an async user controller. `render` mounts App in
   // JSDOM. Object spread combines render's query helpers with `user` in one result.
-  return { user: userEvent.setup(), ...render(<App api={api} initialConversations={conversations} />) }
+  return {
+    user: userEvent.setup(),
+    ...render(<App api={api} initialConversations={conversations} initialSummaries={summaries} />),
+  }
 }
 
 describe('Private Chat', () => {
@@ -76,6 +80,20 @@ describe('Private Chat', () => {
     // toBeVisible is stronger than presence: it also checks that CSS/attributes do
     // not hide the explanation after the disclosure control has been activated.
     expect(screen.getByText('Your conversation is private')).toBeVisible()
+  })
+
+  it('opens and closes the session settings panel', async () => {
+    // Settings must be an interactive status panel rather than a decorative button.
+    // Render the real sidebar and use the accessible button name a screen reader
+    // would announce. This verifies that the click reaches App's panel state.
+    const { user } = await renderApp()
+    await user.click(screen.getByRole('button', { name: 'Settings' }))
+    expect(await screen.findByRole('dialog', { name: 'Session settings' })).toBeVisible()
+
+    // Closing through the visible button verifies the panel does not trap the
+    // interface after a user has reviewed the local session information.
+    await user.click(screen.getByRole('button', { name: 'Close' }))
+    expect(screen.queryByRole('dialog', { name: 'Session settings' })).not.toBeInTheDocument()
   })
 
   it('deletes the selected conversation after confirmation', async () => {
