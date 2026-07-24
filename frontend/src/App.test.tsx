@@ -21,11 +21,13 @@ async function renderApp() {
   // first render. `await` unwraps the Promise returned by the API interface.
   const conversations = await api.listConversations()
   const summaries = await api.listConversationSummaries()
+  const models = await api.listModels()
+  const modelConfiguration = await api.getModelConfiguration()
   // userEvent.setup returns an async user controller. `render` mounts App in
   // JSDOM. Object spread combines render's query helpers with `user` in one result.
   return {
     user: userEvent.setup(),
-    ...render(<App api={api} initialConversations={conversations} initialSummaries={summaries} />),
+    ...render(<App api={api} initialConversations={conversations} initialSummaries={summaries} models={models} modelConfiguration={modelConfiguration} />),
   }
 }
 

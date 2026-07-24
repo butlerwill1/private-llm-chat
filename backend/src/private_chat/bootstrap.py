@@ -13,6 +13,7 @@ from private_chat.adapters.s3_repository import S3ConversationRepository
 from private_chat.adapters.self_hosted import SelfHostedConfiguration, SelfHostedModelClient
 from private_chat.api.routes import router
 from private_chat.application.conversations import ConversationService
+from private_chat.application.model_router import ModelOption, ModelRouter
 from private_chat.application.send_message import SendMessage
 from private_chat.config import ModelBackend, Settings, StorageBackend
 from private_chat.ports.interfaces import (
@@ -63,28 +64,50 @@ def create_app(
         redoc_url=None,
         lifespan=lifespan,
     )
+    model_options: tuple[ModelOption, ...]
     if model_client is None:
         client = http_client or owned_client
         if client is None:  # Defensive invariant for future composition changes.
             raise RuntimeError("HTTP client was not configured")
-        if settings.model_backend == ModelBackend.OPENROUTER:
-            if settings.openrouter_api_key is None:
-                raise ValueError("CHAT_OPENROUTER_API_KEY is required for OpenRouter")
-            model_client = OpenRouterModelClient(
-                OpenRouterConfiguration(
-                    api_key=settings.openrouter_api_key,
-                    allowed_providers=settings.openrouter_allowed_providers,
-                ),
-                client,
-            )
-        else:
-            model_client = SelfHostedModelClient(
+        configured_clients: dict[str, ModelClient] = {}
+        if settings.model_backend is ModelBackend.SELF_HOSTED:
+            configured_clients[settings.model_name] = SelfHostedModelClient(
                 SelfHostedConfiguration(
                     base_url=settings.self_hosted_base_url,
                     api_key=settings.self_hosted_api_key,
                 ),
                 client,
             )
+        openrouter_models = settings.openrouter_models or (
+            (settings.model_name,) if settings.model_backend is ModelBackend.OPENROUTER else ()
+        )
+        openrouter: OpenRouterModelClient | None = None
+        if settings.enable_openrouter or settings.model_backend is ModelBackend.OPENROUTER:
+            if settings.openrouter_api_key is None:
+                raise RuntimeError("Validated OpenRouter key is unexpectedly missing")
+            openrouter = OpenRouterModelClient(
+                OpenRouterConfiguration(
+                    api_key=settings.openrouter_api_key,
+                    allowed_providers=settings.openrouter_allowed_providers,
+                ),
+                client,
+            )
+            configured_clients.update({model: openrouter for model in openrouter_models})
+        model_client = ModelRouter(
+            configured_clients,
+            custom_openrouter_client=openrouter,
+            allow_custom_openrouter_model=settings.allow_custom_openrouter_model,
+        )
+        model_options = tuple(
+            [ModelOption(settings.model_name, "Private GPU (Ollama)", "self_hosted")]
+            if settings.model_backend is ModelBackend.SELF_HOSTED
+            else []
+        ) + tuple(
+            ModelOption(model, f"OpenRouter: {model}", "openrouter")
+            for model in (openrouter_models if settings.enable_openrouter else ())
+        )
+    else:
+        model_options = (ModelOption(settings.model_name, settings.model_name, "test"),)
     repository: ConversationRepository
     data_keys: DataKeyProvider
     if settings.storage_backend is StorageBackend.S3:
@@ -107,5 +130,7 @@ def create_app(
         repository, encryptor, model_client, settings.model_name
     )
     app.state.conversations = ConversationService(repository, encryptor)
+    app.state.model_options = model_options
+    app.state.custom_openrouter_model_allowed = settings.allow_custom_openrouter_model
     app.include_router(router, prefix="/v1")
     return app

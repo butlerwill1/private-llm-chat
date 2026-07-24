@@ -21,6 +21,21 @@ class SendMessageRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
     # Limits provide an early guard against empty input and unbounded request bodies.
     content: str = Field(min_length=1, max_length=32_000)
+    model_id: str | None = Field(default=None, min_length=1, max_length=200)
+
+
+class ModelOptionResponse(BaseModel):
+    """A browser-safe configured model choice with no provider credentials."""
+
+    id: str
+    label: str
+    backend: str
+
+
+class ModelConfigurationResponse(BaseModel):
+    """Non-secret controls that determine which model IDs the browser may submit."""
+
+    custom_openrouter_model_allowed: bool
 
 
 class MessageResponse(BaseModel):

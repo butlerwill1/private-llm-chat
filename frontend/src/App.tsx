@@ -3,15 +3,17 @@ import { Composer } from './components/Composer'
 import { ConversationHeader } from './components/ConversationHeader'
 import { MessageList } from './components/MessageList'
 import { Sidebar } from './components/Sidebar'
-import type { ChatApi, Conversation, ConversationSummary } from './domain/chat'
+import type { ChatApi, Conversation, ConversationSummary, ModelConfiguration, ModelOption } from './domain/chat'
 
 interface AppProps {
   readonly api: ChatApi
   readonly initialConversations: readonly Conversation[]
   readonly initialSummaries: readonly ConversationSummary[]
+  readonly models: readonly ModelOption[]
+  readonly modelConfiguration: ModelConfiguration
 }
 
-export function App({ api, initialConversations, initialSummaries }: AppProps) {
+export function App({ api, initialConversations, initialSummaries, models, modelConfiguration }: AppProps) {
   const [conversations, setConversations] = useState<readonly Conversation[]>(() => initialConversations)
   const [summaries, setSummaries] = useState<readonly ConversationSummary[]>(() => initialSummaries)
   const [selectedId, setSelectedId] = useState(initialSummaries[0]?.id ?? '')
@@ -19,6 +21,7 @@ export function App({ api, initialConversations, initialSummaries }: AppProps) {
   const [isSending, setIsSending] = useState(false)
   const [isLoadingConversation, setIsLoadingConversation] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [selectedModelId, setSelectedModelId] = useState(models[0]?.id ?? '')
   const [error, setError] = useState<string | null>(null)
   const selectedConversation = conversations.find(({ id }) => id === selectedId)
 
@@ -56,12 +59,12 @@ export function App({ api, initialConversations, initialSummaries }: AppProps) {
     }
   }
 
-  const sendMessage = async (body: string) => {
+  const sendMessage = async (body: string, modelId: string) => {
     if (!selectedConversation) return
     setIsSending(true)
     setError(null)
     try {
-      const updated = await api.sendMessage({ conversationId: selectedConversation.id, body })
+      const updated = await api.sendMessage({ conversationId: selectedConversation.id, body, modelId })
       startTransition(() => {
         setConversations((current) => current.map((conversation) =>
           conversation.id === updated.id ? updated : conversation,
@@ -121,13 +124,19 @@ export function App({ api, initialConversations, initialSummaries }: AppProps) {
         {selectedConversation ? <MessageList messages={selectedConversation.messages} /> : <p className="conversation-loading">Loading encrypted conversation…</p>}
         {isSending ? <p className="response-pending" role="status">The local model is generating a response…</p> : null}
         {error ? <p className="request-error" role="alert">{error}</p> : null}
-        <Composer disabled={isSending} onSend={sendMessage} />
+        <Composer disabled={isSending} selectedModelId={selectedModelId} onSend={sendMessage} />
       </main>
       {settingsOpen ? (
         <div className="settings-backdrop" role="presentation" onClick={() => setSettingsOpen(false)}>
           <section className="settings-panel" role="dialog" aria-modal="true" aria-labelledby="settings-title" onClick={(event) => event.stopPropagation()}>
             <div className="settings-heading"><h2 id="settings-title">Session settings</h2><button type="button" onClick={() => setSettingsOpen(false)}>Close</button></div>
-            <dl><dt>Model</dt><dd>private-chat (Qwen3 8B, Q4_K_M)</dd><dt>Connection</dt><dd>Private SSM tunnel to Ollama</dd><dt>Transcript storage</dt><dd>Envelope encrypted, stored in S3</dd><dt>Response display</dt><dd>Shown once generation completes</dd></dl>
+            <dl><dt>Selected model</dt><dd>{models.find((item) => item.id === selectedModelId)?.label ?? selectedModelId}</dd><dt>Transcript storage</dt><dd>Envelope encrypted, stored in S3</dd><dt>Response display</dt><dd>Shown once generation completes</dd></dl>
+            <label className="settings-model-label" htmlFor="settings-model">Model</label>
+            <select id="settings-model" value={models.some((item) => item.id === selectedModelId) ? selectedModelId : ''} onChange={(event) => setSelectedModelId(event.target.value)}>
+              {models.map((model) => <option key={model.id} value={model.id}>{model.label}</option>)}
+              {modelConfiguration.customOpenRouterModelAllowed ? <option value="">Custom OpenRouter model ID</option> : null}
+            </select>
+            {modelConfiguration.customOpenRouterModelAllowed ? <input className="settings-model-input" aria-label="Custom OpenRouter model ID" value={models.some((item) => item.id === selectedModelId) ? '' : selectedModelId} onChange={(event) => setSelectedModelId(event.target.value)} placeholder="organisation/model-name" /> : null}
             <p className="settings-note">GPU temperature and total GPU memory require a dedicated remote telemetry endpoint; they are not inferred from the browser.</p>
           </section>
         </div>

@@ -11,6 +11,7 @@ from private_chat.ports.interfaces import ConversationRepository, EnvelopeEncryp
 class SendMessageCommand:
     conversation_id: UUID
     content: str
+    model_id: str | None = None
 
 
 class SendMessage:
@@ -46,7 +47,7 @@ class SendMessage:
             for item in history_records
         )
         response = await self._model_client.generate(
-            ModelRequest(messages=(*history, user), model=self._model_name)
+            ModelRequest(messages=(*history, user), model=command.model_id or self._model_name)
         )
         assistant = ChatMessage.create(Role.ASSISTANT, response.content)
 

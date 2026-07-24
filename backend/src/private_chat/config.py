@@ -47,7 +47,27 @@ class Settings(BaseSettings):
     # leave a browser request open forever, but generous enough for GPU inference.
     model_response_timeout_seconds: int = Field(default=300, ge=1, le=900)
     openrouter_api_key: SecretStr | None = None
+    enable_openrouter: bool = False
+    # A comma-separated CHAT_OPENROUTER_MODELS value is deliberately an
+    # allowlist. The browser never supplies arbitrary upstream model IDs.
+    openrouter_models: tuple[str, ...] = (
+        "meta-llama/llama-3.3-70b-instruct",
+        "qwen/qwen3-32b",
+        "deepseek/deepseek-r1",
+        "mistralai/mistral-small-3.1-24b-instruct",
+        "google/gemma-3-27b-it",
+    )
+    allow_custom_openrouter_model: bool = False
     openrouter_allowed_providers: tuple[str, ...] = ()
+
+    @field_validator("openrouter_models", "openrouter_allowed_providers", mode="before")
+    @classmethod
+    def split_model_lists(cls, value: object) -> tuple[str, ...] | object:
+        """Accept ergonomic comma-separated environment settings as immutable tuples."""
+
+        if isinstance(value, str):
+            return tuple(item.strip() for item in value.split(",") if item.strip())
+        return value
 
     @field_validator("local_master_key_b64")
     @classmethod
@@ -75,6 +95,13 @@ class Settings(BaseSettings):
             if self.conversation_bucket is None or self.kms_key_id is None:
                 raise ValueError(
                     "CHAT_CONVERSATION_BUCKET and CHAT_KMS_KEY_ID are required for S3 storage"
+                )
+        if self.enable_openrouter or self.model_backend is ModelBackend.OPENROUTER:
+            if self.openrouter_api_key is None:
+                raise ValueError("CHAT_OPENROUTER_API_KEY is required for CHAT_OPENROUTER_MODELS")
+            if not self.openrouter_allowed_providers:
+                raise ValueError(
+                    "CHAT_OPENROUTER_ALLOWED_PROVIDERS is required for CHAT_OPENROUTER_MODELS"
                 )
         return self
 

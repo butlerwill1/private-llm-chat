@@ -105,6 +105,30 @@ The GPU also has an independent systemd timer controlled by
 `gpu_max_runtime_minutes` (two hours by default). It initiates an EC2 stop even
 if this computer crashes and the script's normal cleanup cannot run.
 
+## OpenRouter-only session (no GPU cost)
+
+This is the alternative personal mode when inference may leave AWS through
+OpenRouter. Do **not** start the GPU, create SSM endpoints, or open an Ollama
+tunnel. The React frontend and encrypted conversation storage remain the same;
+only the backend's inference adapter changes.
+
+Before starting, set a key and a reviewed provider allowlist in the current
+PowerShell session. The adapter still sends `data_collection: "deny"`, `zdr:
+true`, disables provider fallbacks, and uses only these provider slugs.
+
+```powershell
+$env:CHAT_OPENROUTER_API_KEY = '<your key>'
+$env:CHAT_OPENROUTER_ALLOWED_PROVIDERS = '<reviewed provider slug>'
+.\scripts\start-openrouter-backend.ps1
+```
+
+In another terminal, start the unchanged frontend with `cd frontend; pnpm dev`.
+Settings then provides five configured open-weight model choices. Pass
+`-AllowCustomModel` only when you intentionally want to enter an arbitrary
+OpenRouter model ID; otherwise the backend rejects IDs outside the five-model
+catalogue. OpenRouter privacy controls reduce external retention and data
+collection, but this is not equivalent to private GPU inference.
+
 ## End the session and stop charges
 
 1. Close the frontend and backend processes.

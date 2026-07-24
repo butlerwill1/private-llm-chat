@@ -8,9 +8,12 @@ from private_chat.api.schemas import (
     ConversationResponse,
     ConversationSummaryResponse,
     HealthResponse,
+    ModelConfigurationResponse,
+    ModelOptionResponse,
     SendMessageRequest,
 )
 from private_chat.application.conversations import ConversationService
+from private_chat.application.model_router import ModelOption
 from private_chat.application.send_message import SendMessage, SendMessageCommand
 
 router = APIRouter()
@@ -24,9 +27,38 @@ def get_conversations(request: Request) -> ConversationService:
     return cast(ConversationService, request.app.state.conversations)
 
 
+def get_model_options(request: Request) -> tuple[ModelOption, ...]:
+    return cast(tuple[ModelOption, ...], request.app.state.model_options)
+
+
+def get_custom_model_allowed(request: Request) -> bool:
+    return cast(bool, request.app.state.custom_openrouter_model_allowed)
+
+
 @router.get("/health", response_model=HealthResponse)
 async def health() -> HealthResponse:
     return HealthResponse(status="ok")
+
+
+@router.get("/models", response_model=tuple[ModelOptionResponse, ...])
+async def list_models(
+    options: Annotated[tuple[ModelOption, ...], Depends(get_model_options)],
+) -> tuple[ModelOptionResponse, ...]:
+    """Return only the approved model catalogue for this local session."""
+
+    return tuple(
+        ModelOptionResponse(id=item.id, label=item.label, backend=item.backend)
+        for item in options
+    )
+
+
+@router.get("/model-configuration", response_model=ModelConfigurationResponse)
+async def model_configuration(
+    custom_model_allowed: Annotated[bool, Depends(get_custom_model_allowed)],
+) -> ModelConfigurationResponse:
+    """Tell the browser whether typed OpenRouter model IDs are enabled locally."""
+
+    return ModelConfigurationResponse(custom_openrouter_model_allowed=custom_model_allowed)
 
 
 @router.get("/conversations", response_model=tuple[ConversationResponse, ...])
@@ -96,6 +128,7 @@ async def send_message(
             SendMessageCommand(
                 conversation_id=conversation_id,
                 content=body.content,
+                model_id=body.model_id,
             )
         )
     except KeyError as error:

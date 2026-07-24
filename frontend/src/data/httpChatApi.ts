@@ -1,4 +1,4 @@
-import type { ChatApi, ChatMessage, Conversation, ConversationSummary, SendMessageRequest } from '../domain/chat'
+import type { ChatApi, ChatMessage, Conversation, ConversationSummary, ModelConfiguration, ModelOption, SendMessageRequest } from '../domain/chat'
 
 interface ApiMessage {
   readonly id: string
@@ -95,6 +95,24 @@ export class HttpChatApi implements ChatApi {
     return toDomain(parseConversation(value))
   }
 
+  async listModels(): Promise<readonly ModelOption[]> {
+    const value = await readJson(await fetch(`${this.baseUrl}/models`))
+    if (!Array.isArray(value) || value.some((item) => !isRecord(item)
+      || typeof item.id !== 'string' || typeof item.label !== 'string'
+      || (item.backend !== 'self_hosted' && item.backend !== 'openrouter' && item.backend !== 'test'))) {
+      throw new Error('The chat API returned an invalid model catalogue.')
+    }
+    return value as ModelOption[]
+  }
+
+  async getModelConfiguration(): Promise<ModelConfiguration> {
+    const value = await readJson(await fetch(`${this.baseUrl}/model-configuration`))
+    if (!isRecord(value) || typeof value.custom_openrouter_model_allowed !== 'boolean') {
+      throw new Error('The chat API returned invalid model configuration.')
+    }
+    return { customOpenRouterModelAllowed: value.custom_openrouter_model_allowed }
+  }
+
   async createConversation(): Promise<Conversation> {
     const value = await readJson(await fetch(`${this.baseUrl}/conversations`, {
       method: 'POST',
@@ -108,7 +126,7 @@ export class HttpChatApi implements ChatApi {
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content: request.body }),
+        body: JSON.stringify({ content: request.body, model_id: request.modelId }),
       },
     ))
     return toDomain(parseConversation(value))

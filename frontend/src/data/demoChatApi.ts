@@ -1,4 +1,4 @@
-import type { ChatApi, Conversation, ConversationSummary, SendMessageRequest } from '../domain/chat'
+import type { ChatApi, Conversation, ConversationSummary, ModelConfiguration, ModelOption, SendMessageRequest } from '../domain/chat'
 
 const starterConversations: readonly Conversation[] = [
   {
@@ -51,6 +51,14 @@ export class DemoChatApi implements ChatApi {
     const conversation = this.conversations.find(({ id }) => id === conversationId)
     if (!conversation) throw new Error('The selected conversation could not be found.')
     return conversation
+  }
+
+  async listModels(): Promise<readonly ModelOption[]> {
+    return [{ id: 'private-chat', label: 'Private GPU (Ollama)', backend: 'self_hosted' }]
+  }
+
+  async getModelConfiguration(): Promise<ModelConfiguration> {
+    return { customOpenRouterModelAllowed: false }
   }
 
   async createConversation(): Promise<Conversation> {
