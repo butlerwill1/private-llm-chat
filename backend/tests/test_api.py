@@ -26,6 +26,17 @@ class StubModel:
         return ModelResponse("hello", request.model, "stub")
 
 
+class TimingOutModel:
+    """Model double that simulates a tunnel or inference response timeout."""
+
+    async def generate(self, request: ModelRequest) -> ModelResponse:
+        """Raise the same HTTPX exception produced by the real model adapter."""
+
+        # The route must translate infrastructure timeouts into a useful HTTP
+        # response instead of returning an unhandled 500 to the browser.
+        raise httpx.ReadTimeout("model response exceeded the configured timeout")
+
+
 @pytest.mark.asyncio
 async def test_api_validates_and_returns_a_turn() -> None:
     """A valid message should produce a complete user-and-assistant transcript.
@@ -89,6 +100,31 @@ async def test_api_forbids_unexpected_fields() -> None:
         )
     # FastAPI uses 422 for a body that cannot satisfy the Pydantic schema.
     assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_api_reports_model_timeout_as_gateway_timeout() -> None:
+    """A slow local model should produce a retryable 504 rather than a 500.
+
+    The in-memory transport calls the complete FastAPI route while TimingOutModel
+    avoids a real GPU request. This keeps the test deterministic and proves the
+    browser receives a meaningful status code for this operational failure.
+    """
+
+    settings = Settings(local_master_key_b64=base64.b64encode(b"x" * 32).decode())
+    app = create_app(settings, model_client=TimingOutModel())
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        created = await client.post("/v1/conversations")
+        response = await client.post(
+            f"/v1/conversations/{created.json()['id']}/messages",
+            json={"content": "hello"},
+        )
+
+    assert response.status_code == 504
+    assert response.json()["detail"] == (
+        "The local model did not respond before the inference timeout."
+    )
 
 
 @pytest.mark.asyncio

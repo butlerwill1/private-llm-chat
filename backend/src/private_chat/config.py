@@ -4,7 +4,7 @@ import base64
 import binascii
 from enum import StrEnum
 
-from pydantic import SecretStr, field_validator, model_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -42,6 +42,10 @@ class Settings(BaseSettings):
     aws_region: str = "eu-west-2"
     self_hosted_base_url: str = "http://127.0.0.1:11434/v1"
     self_hosted_api_key: SecretStr | None = None
+    # Local models can take longer than a hosted API, especially for the first
+    # request after startup. Keep the limit finite so a broken tunnel does not
+    # leave a browser request open forever, but generous enough for GPU inference.
+    model_response_timeout_seconds: int = Field(default=300, ge=1, le=900)
     openrouter_api_key: SecretStr | None = None
     openrouter_allowed_providers: tuple[str, ...] = ()
 

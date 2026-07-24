@@ -1,6 +1,7 @@
 from typing import Annotated, cast
 from uuid import UUID
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 
 from private_chat.api.schemas import ConversationResponse, HealthResponse, SendMessageRequest
@@ -83,6 +84,13 @@ async def send_message(
     except KeyError as error:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found"
+        ) from error
+    except httpx.TimeoutException as error:
+        # A local model can need time to generate, but a finite timeout still
+        # protects the browser from a permanently broken tunnel or model service.
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail="The local model did not respond before the inference timeout.",
         ) from error
     view = await service.get(conversation_id)
     if view is None:

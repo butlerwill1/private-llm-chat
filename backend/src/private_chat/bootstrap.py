@@ -32,7 +32,20 @@ def create_app(
 
     owned_client: httpx.AsyncClient | None = None
     if model_client is None and http_client is None:
-        owned_client = httpx.AsyncClient(timeout=httpx.Timeout(60))
+        # Connect failures should be reported quickly, while a local model is
+        # allowed several minutes to generate a complete response.
+        owned_client = httpx.AsyncClient(
+            timeout=httpx.Timeout(
+                connect=10,
+                read=settings.model_response_timeout_seconds,
+                write=30,
+                pool=10,
+            ),
+            # The self-hosted endpoint is a loopback tunnel. Inheriting desktop
+            # proxy configuration could route that private request through a
+            # proxy or make it fail despite the tunnel being healthy.
+            trust_env=settings.model_backend is ModelBackend.OPENROUTER,
+        )
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
