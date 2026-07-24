@@ -62,6 +62,15 @@ button:focus-visible, textarea:focus-visible, select:focus-visible, summary:focu
 .message-content { padding-top: 8px; font-size: 21px; line-height: 1.65; }
 .message-content strong { display: block; margin-bottom: 10px; font-size: 21px; font-weight: 600; line-height: 1.2; }
 .message-content p { margin: 0; }
+.message-content > :not(strong) { margin: 0 0 16px; }
+.message-content > :last-child { margin-bottom: 0; }
+.message-content h1, .message-content h2, .message-content h3 { margin-top: 0; font-family: Georgia, "Times New Roman", serif; line-height: 1.2; }
+.message-content h1 { font-size: 1.5em; }.message-content h2 { font-size: 1.3em; }.message-content h3 { font-size: 1.15em; }
+.message-content ul, .message-content ol { padding-left: 1.4em; }
+.message-content li + li { margin-top: 5px; }
+.message-content code { padding: 0.12em 0.32em; border-radius: 4px; background: #edf1ef; font-family: "Cascadia Code", Consolas, monospace; font-size: 0.88em; }
+.message-content pre { padding: 16px; overflow-x: auto; border-radius: 7px; color: #edf6f1; background: #17231e; }.message-content pre code { padding: 0; background: transparent; color: inherit; }
+.message-content a { color: var(--green); text-decoration-thickness: 1px; text-underline-offset: 3px; }
 .message--user { align-self: flex-end; width: min(540px, 65%); padding: 31px 38px 28px; border-radius: 9px; background: var(--user-surface); }
 .message--user .message-content { padding: 0; }
 
