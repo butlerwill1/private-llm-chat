@@ -39,8 +39,10 @@ resource type that supports tagging, including resources created by child module
 can add reporting dimensions such as `Workload`, but it cannot override the
 protected keys. The optional GPU instance carries an `AutoStop` tag describing
 its instance-side systemd watchdog. By default it shuts itself down two hours
-after every boot, even if the controlling laptop or terminal has disappeared. Its
-root EBS volume receives the standard tags explicitly.
+after every boot, even if the controlling laptop or terminal has disappeared.
+The watchdog explicitly resets its timer after each restart, so stopping and
+later starting the same instance always begins a fresh allowance. Its root EBS
+volume receives the standard tags explicitly.
 
 After the first tagged resources are created, activate the user-defined tag keys
 in AWS Billing and Cost Management under **Cost allocation tags**. Until they are

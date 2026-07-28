@@ -110,9 +110,31 @@ resource "aws_instance" "gpu" {
 
           [Install]
           WantedBy=timers.target
+      - path: /etc/systemd/system/private-chat-autostop-reset.service
+        permissions: '0644'
+        content: |
+          [Unit]
+          Description=Reset the private chat GPU auto-stop countdown after each boot
+          After=network-online.target
+          Wants=network-online.target
+
+          [Service]
+          Type=oneshot
+          # The root EBS volume persists while an EC2 instance is stopped. Reset
+          # the timer explicitly on every Linux boot so an elapsed countdown
+          # cannot immediately stop a subsequently restarted GPU session.
+          ExecStart=/usr/bin/systemctl stop private-chat-autostop.timer
+          ExecStart=/usr/bin/systemctl reset-failed private-chat-autostop.timer
+          ExecStart=/usr/bin/systemctl start private-chat-autostop.timer
+
+          [Install]
+          WantedBy=multi-user.target
     runcmd:
       - [systemctl, daemon-reload]
-      - [systemctl, enable, --now, private-chat-autostop.timer]
+      # Enable the timer and the reset service separately. The reset service
+      # starts the timer at first boot and restarts it at every later boot.
+      - [systemctl, enable, private-chat-autostop.timer]
+      - [systemctl, enable, --now, private-chat-autostop-reset.service]
   CLOUD_INIT
 
   metadata_options {

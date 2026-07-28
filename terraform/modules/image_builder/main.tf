@@ -1,5 +1,8 @@
 locals {
-  model_enabled               = var.model_s3_bucket != null
+  s3_model_enabled            = var.model_s3_bucket != null
+  registry_model_enabled      = var.ollama_model_reference != null
+  model_enabled               = local.s3_model_enabled || local.registry_model_enabled
+  model_source                = local.s3_model_enabled ? "s3_gguf" : (local.registry_model_enabled ? "ollama_registry" : "none")
   ollama_url                  = "https://github.com/ollama/ollama/releases/download/v${var.ollama_version}/ollama-linux-amd64.tar.zst"
   approved_ami_parameter_name = "/${var.name}/gpu/approved-ami"
 }
@@ -22,10 +25,20 @@ resource "terraform_data" "validate_model_inputs" {
   lifecycle {
     precondition {
       condition = (
-        (var.model_s3_bucket == null && var.model_s3_key == null && var.model_sha256 == null && var.model_name == null) ||
-        (var.model_s3_bucket != null && var.model_s3_key != null && var.model_sha256 != null && var.model_name != null)
+        (
+          var.model_s3_bucket == null && var.model_s3_key == null && var.model_sha256 == null &&
+          var.ollama_model_reference == null && var.ollama_model_manifest_digest == null && var.model_name == null
+        ) ||
+        (
+          var.model_s3_bucket != null && var.model_s3_key != null && var.model_sha256 != null &&
+          var.ollama_model_reference == null && var.ollama_model_manifest_digest == null && var.model_name != null
+        ) ||
+        (
+          var.model_s3_bucket == null && var.model_s3_key == null && var.model_sha256 == null &&
+          var.ollama_model_reference != null && var.ollama_model_manifest_digest != null && var.model_name != null
+        )
       )
-      error_message = "model_s3_bucket, model_s3_key, model_sha256, and model_name must all be set or all be null."
+      error_message = "Choose exactly one model source: complete S3 GGUF fields or a complete pinned Ollama registry reference and digest."
     }
   }
 }
@@ -222,7 +235,7 @@ data "aws_iam_policy_document" "builder_data" {
   }
 
   dynamic "statement" {
-    for_each = local.model_enabled ? [1] : []
+    for_each = local.s3_model_enabled ? [1] : []
     content {
       sid       = "ReadChecksumVerifiedModel"
       actions   = ["s3:GetObject"]
@@ -306,13 +319,16 @@ resource "aws_imagebuilder_component" "install" {
   tags        = var.tags
 
   data = templatefile("${path.module}/components/install-ollama.yaml.tftpl", {
-    model_enabled  = local.model_enabled ? "true" : "false"
-    model_name     = coalesce(var.model_name, "not-configured")
-    model_s3_uri   = local.model_enabled ? "s3://${var.model_s3_bucket}/${var.model_s3_key}" : "not-configured"
-    model_sha256   = coalesce(var.model_sha256, "not-configured")
-    ollama_sha256  = lower(var.ollama_sha256)
-    ollama_url     = local.ollama_url
-    ollama_version = var.ollama_version
+    model_enabled                  = local.model_enabled ? "true" : "false"
+    model_source                   = local.model_source
+    model_name                     = coalesce(var.model_name, "not-configured")
+    model_s3_uri                   = local.s3_model_enabled ? "s3://${var.model_s3_bucket}/${var.model_s3_key}" : "not-configured"
+    model_sha256                   = coalesce(var.model_sha256, "not-configured")
+    registry_model_reference       = coalesce(var.ollama_model_reference, "not-configured")
+    registry_model_manifest_digest = coalesce(var.ollama_model_manifest_digest, "not-configured")
+    ollama_sha256                  = lower(var.ollama_sha256)
+    ollama_url                     = local.ollama_url
+    ollama_version                 = var.ollama_version
   })
 
   depends_on = [terraform_data.validate_model_inputs]

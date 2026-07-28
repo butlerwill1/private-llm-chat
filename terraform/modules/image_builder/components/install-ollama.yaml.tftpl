@@ -161,16 +161,35 @@ phases:
                 echo 'No model artefact configured; model and GPU inference tests will be skipped.'
                 exit 0
               fi
-              install --directory --owner ollama --group ollama --mode 0750 /var/lib/ollama/import
-              aws s3 cp '${model_s3_uri}' /var/lib/ollama/import/model.gguf --only-show-errors
-              echo '${model_sha256}  /var/lib/ollama/import/model.gguf' | sha256sum --check --strict
-              chown ollama:ollama /var/lib/ollama/import/model.gguf
-              printf 'FROM /var/lib/ollama/import/model.gguf\n' >/var/lib/ollama/import/Modelfile
-              chown ollama:ollama /var/lib/ollama/import/Modelfile
-              sudo --user ollama HOME=/var/lib/ollama /usr/bin/ollama create \
-                '${model_name}' --file /var/lib/ollama/import/Modelfile
-              rm --force /var/lib/ollama/import/model.gguf /var/lib/ollama/import/Modelfile
-              rmdir /var/lib/ollama/import
+              if [ '${model_source}' = 's3_gguf' ]; then
+                install --directory --owner ollama --group ollama --mode 0750 /var/lib/ollama/import
+                aws s3 cp '${model_s3_uri}' /var/lib/ollama/import/model.gguf --only-show-errors
+                echo '${model_sha256}  /var/lib/ollama/import/model.gguf' | sha256sum --check --strict
+                chown ollama:ollama /var/lib/ollama/import/model.gguf
+                printf 'FROM /var/lib/ollama/import/model.gguf\n' >/var/lib/ollama/import/Modelfile
+                chown ollama:ollama /var/lib/ollama/import/Modelfile
+                sudo --user ollama HOME=/var/lib/ollama /usr/bin/ollama create \
+                  '${model_name}' --file /var/lib/ollama/import/Modelfile
+                rm --force /var/lib/ollama/import/model.gguf /var/lib/ollama/import/Modelfile
+                rmdir /var/lib/ollama/import
+              elif [ '${model_source}' = 'ollama_registry' ]; then
+                # The registry manifest includes the model and vision-projector
+                # layers together. Verify its immutable digest before allowing
+                # Ollama to pull the package; importing only a Qwen 3.5 GGUF
+                # would otherwise lose its image capability.
+                registry_repository=$(printf '%s' '${registry_model_reference}' | cut -d: -f1)
+                registry_tag=$(printf '%s' '${registry_model_reference}' | cut -d: -f2)
+                observed_digest=$(curl --fail --silent --show-error --head \
+                  "https://registry.ollama.ai/v2/library/$registry_repository/manifests/$registry_tag" \
+                  | tr -d '\r' | awk -F ': ' 'tolower($1) == "ollama-content-digest" { print tolower($2) }')
+                test "$observed_digest" = '${registry_model_manifest_digest}'
+                sudo --user ollama HOME=/var/lib/ollama /usr/bin/ollama pull '${registry_model_reference}'
+                sudo --user ollama HOME=/var/lib/ollama /usr/bin/ollama cp \
+                  '${registry_model_reference}' '${model_name}'
+              else
+                echo 'Unsupported configured model source.' >&2
+                exit 1
+              fi
       - name: RecordBuildProvenance
         action: ExecuteBash
         timeoutSeconds: 60
@@ -187,8 +206,11 @@ phases:
                 "ollama_llm_library": "cuda_v12",
                 "gpu_readiness_probe": "llama-server --list-devices",
                 "model_configured": ${model_enabled},
+                "model_source": "${model_source}",
                 "model_name": "${model_name}",
-                "model_sha256": "${model_sha256}"
+                "model_sha256": "${model_sha256}",
+                "registry_model_reference": "${registry_model_reference}",
+                "registry_model_manifest_digest": "${registry_model_manifest_digest}"
               }
               JSON
               chmod 0444 /etc/private-llm-chat/image-build.json
