@@ -329,6 +329,7 @@ resource "aws_imagebuilder_component" "install" {
     ollama_sha256                  = lower(var.ollama_sha256)
     ollama_url                     = local.ollama_url
     ollama_version                 = var.ollama_version
+    readiness_script_base64        = filebase64("${path.module}/scripts/verify-ollama-readiness.sh")
   })
 
   depends_on = [terraform_data.validate_model_inputs]

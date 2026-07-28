@@ -26,12 +26,18 @@ that port only from application compute and assigns no public address.
 
 ## Approval flow
 
-The test phase checks NVIDIA, systemd, the exact Ollama version, and its local API.
-When a model is included, it performs a generation and fails unless `ollama ps`
-reports GPU use. Successful distribution keeps the AMI private and publishes its
-ID to the module's typed `aws:ec2:image` SSM parameter. A later Terraform run may
-set `gpu_ami_ssm_parameter_name` to consume it. This two-step flow prevents a
-failed or still-running build from becoming the runtime image.
+The test phase checks NVIDIA, systemd, the exact Ollama version, and its local
+API. When a model is included, the shared readiness probe performs text
+generation, vision generation, three consecutive warm vision requests, confirms
+the model appears in `/api/ps`, and samples `nvidia-smi` to require non-zero GPU
+utilisation. A timeout captures service status, the journal, GPU and process
+state, memory, storage and kernel OOM events in
+`/var/log/private-llm-chat/ollama-readiness-*.log`.
+
+Successful distribution keeps the AMI private and publishes its ID to the
+module's typed `aws:ec2:image` SSM parameter. A later Terraform run may set
+`gpu_ami_ssm_parameter_name` to consume it. This two-step flow prevents a failed
+or still-running build from becoming the runtime image.
 
 The service pins `OLLAMA_LLM_LIBRARY=cuda_v12`. Ollama documents this override
 as the fallback when automatic LLM-library detection is unreliable. The image
@@ -44,6 +50,13 @@ falling back to CPU while the EC2 GPU driver is still initialising. Tests also
 check CUDA selection before loading the model, avoiding a long CPU-only cold
 load. Candidate AMIs are tagged `ImageStatus=candidate`; the typed SSM parameter
 is the approval signal because Image Builder creates the AMI before testing it.
+
+The single-model service explicitly uses one runner and one parallel request,
+keeps the runner warm for 30 minutes, and uses an 8K context for vision-heavy
+PDF prompts. `LLAMA_ARG_CACHE_RAM=512` bounds llama.cpp's otherwise 8 GiB
+persistent prompt cache. This matters on `g6.xlarge`, which has 16 GiB host RAM;
+mostly unique PDF pages obtain little benefit from retaining an 8 GiB prompt
+cache.
 
 AWS component and recipe semantic versions are immutable. Bump the component
 version for template changes and the recipe version for recipe/input changes.

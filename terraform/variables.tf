@@ -185,13 +185,13 @@ variable "ollama_sha256" {
 variable "image_builder_component_version" {
   description = "AWSTOE component version. Bump whenever component templates change."
   type        = string
-  default     = "1.0.6"
+  default     = "1.0.7"
 }
 
 variable "image_builder_recipe_version" {
   description = "Image recipe version. Bump whenever recipe inputs change."
   type        = string
-  default     = "1.0.6"
+  default     = "1.0.7"
 }
 
 variable "image_builder_instance_types" {
