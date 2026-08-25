@@ -5,16 +5,18 @@ const starterConversations: readonly Conversation[] = [
     id: 'sunday-reflection',
     title: 'Sunday reflection',
     messages: [
-      { id: 'sunday-1', author: 'assistant', body: 'What would you like to reflect on?' },
+      { id: 'sunday-1', author: 'assistant', body: 'What would you like to reflect on?', usage: null },
       {
         id: 'sunday-2',
         author: 'user',
         body: 'I want to think through what went well this week and what I should change.',
+        usage: null,
       },
       {
         id: 'sunday-3',
         author: 'assistant',
         body: 'Let’s take it one step at a time. What felt most meaningful?',
+        usage: null,
       },
     ],
   },
@@ -22,14 +24,14 @@ const starterConversations: readonly Conversation[] = [
     id: 'project-decisions',
     title: 'Project decisions',
     messages: [
-      { id: 'project-1', author: 'assistant', body: 'What decision would you like to work through?' },
+      { id: 'project-1', author: 'assistant', body: 'What decision would you like to work through?', usage: null },
     ],
   },
   {
     id: 'reading-notes',
     title: 'Reading notes',
     messages: [
-      { id: 'reading-1', author: 'assistant', body: 'What would you like to remember from your reading?' },
+      { id: 'reading-1', author: 'assistant', body: 'What would you like to remember from your reading?', usage: null },
     ],
   },
 ]
@@ -54,18 +56,25 @@ export class DemoChatApi implements ChatApi {
   }
 
   listModels(): Promise<readonly ModelOption[]> {
-    return Promise.resolve([{ id: 'private-chat', label: 'Private GPU (Ollama)', backend: 'self_hosted' }])
+    return Promise.resolve([{
+      id: 'meta-llama/llama-3.3-70b-instruct', label: 'OpenRouter ZDR: Llama 3.3 70B',
+      backend: 'openrouter', provider: 'deepinfra',
+    }])
   }
 
   getModelConfiguration(): Promise<ModelConfiguration> {
-    return Promise.resolve({ customOpenRouterModelAllowed: false })
+    return Promise.resolve({
+      customOpenRouterModelAllowed: false,
+      modelBackend: 'openrouter',
+      storageLabel: 'Encrypted local database',
+    })
   }
 
   async createConversation(): Promise<Conversation> {
     const conversation: Conversation = {
       id: makeId(),
       title: 'New conversation',
-      messages: [{ id: makeId(), author: 'assistant', body: 'What would you like to reflect on?' }],
+      messages: [{ id: makeId(), author: 'assistant', body: 'What would you like to reflect on?', usage: null }],
     }
     this.conversations = [conversation, ...this.conversations]
     return Promise.resolve(conversation)
@@ -82,8 +91,8 @@ export class DemoChatApi implements ChatApi {
       ...current,
       messages: [
         ...current.messages,
-        { id: makeId(), author: 'user', body: request.body },
-        { id: makeId(), author: 'assistant', body: response },
+        { id: makeId(), author: 'user', body: request.body, usage: null },
+        { id: makeId(), author: 'assistant', body: response, usage: null },
       ],
     }
     this.conversations = this.conversations.map((conversation) =>

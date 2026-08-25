@@ -1,3 +1,4 @@
+import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -11,11 +12,13 @@ from private_chat.adapters.memory_repository import InMemoryConversationReposito
 from private_chat.adapters.openrouter import OpenRouterConfiguration, OpenRouterModelClient
 from private_chat.adapters.s3_repository import S3ConversationRepository
 from private_chat.adapters.self_hosted import SelfHostedConfiguration, SelfHostedModelClient
+from private_chat.adapters.sqlite_repository import SqliteConversationRepository
+from private_chat.adapters.windows_dpapi import DpapiLocalDataKeyProvider
 from private_chat.api.routes import router
 from private_chat.application.conversations import ConversationService
 from private_chat.application.model_router import ModelOption, ModelRouter
 from private_chat.application.send_message import SendMessage
-from private_chat.config import ModelBackend, Settings, StorageBackend
+from private_chat.config import LocalKeyMode, ModelBackend, Settings, StorageBackend
 from private_chat.ports.interfaces import (
     ConversationRepository,
     DataKeyProvider,
@@ -48,9 +51,18 @@ def create_app(
             trust_env=settings.model_backend is ModelBackend.OPENROUTER,
         )
 
+    openrouter_clients: dict[str, OpenRouterModelClient] = {}
+
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         try:
+            if settings.openrouter_zdr_preflight:
+                await asyncio.gather(
+                    *(
+                        client.verify_zdr_route(model_id)
+                        for model_id, client in openrouter_clients.items()
+                    )
+                )
             yield
         finally:
             if owned_client is not None:
@@ -78,21 +90,22 @@ def create_app(
                 ),
                 client,
             )
-        openrouter_models = settings.openrouter_models or (
-            (settings.model_name,) if settings.model_backend is ModelBackend.OPENROUTER else ()
-        )
         openrouter: OpenRouterModelClient | None = None
         if settings.enable_openrouter or settings.model_backend is ModelBackend.OPENROUTER:
             if settings.openrouter_api_key is None:
                 raise RuntimeError("Validated OpenRouter key is unexpectedly missing")
-            openrouter = OpenRouterModelClient(
-                OpenRouterConfiguration(
-                    api_key=settings.openrouter_api_key,
-                    allowed_providers=settings.openrouter_allowed_providers,
-                ),
-                client,
-            )
-            configured_clients.update({model: openrouter for model in openrouter_models})
+            for route in settings.openrouter_routes:
+                route_client = OpenRouterModelClient(
+                    OpenRouterConfiguration(
+                        api_key=settings.openrouter_api_key,
+                        allowed_providers=(route.provider,),
+                        max_output_tokens=settings.openrouter_max_output_tokens,
+                    ),
+                    client,
+                )
+                configured_clients[route.model_id] = route_client
+                openrouter_clients[route.model_id] = route_client
+                openrouter = openrouter or route_client
         model_client = ModelRouter(
             configured_clients,
             custom_openrouter_client=openrouter,
@@ -103,8 +116,10 @@ def create_app(
             if settings.model_backend is ModelBackend.SELF_HOSTED
             else []
         ) + tuple(
-            ModelOption(model, f"OpenRouter: {model}", "openrouter")
-            for model in (openrouter_models if settings.enable_openrouter else ())
+            ModelOption(
+                route.model_id, f"OpenRouter ZDR: {route.label}", "openrouter", route.provider
+            )
+            for route in (settings.openrouter_routes if settings.enable_openrouter else ())
         )
     else:
         model_options = (ModelOption(settings.model_name, settings.model_name, "test"),)
@@ -121,16 +136,31 @@ def create_app(
         data_keys = KmsDataKeyProvider(
             boto3.client("kms", region_name=settings.aws_region), settings.kms_key_id
         )
-    else:
+    elif settings.storage_backend is StorageBackend.MEMORY:
         repository = InMemoryConversationRepository()
         data_keys = LocalAesDataKeyProvider(settings.local_master_key())
+    else:
+        data_directory = settings.resolved_local_data_dir()
+        database_path = data_directory / "conversations.sqlite3"
+        data_keys = (
+            DpapiLocalDataKeyProvider.load_or_create(data_directory, database_path=database_path)
+            if settings.local_key_mode is LocalKeyMode.DPAPI
+            else LocalAesDataKeyProvider(settings.local_master_key())
+        )
+        repository = SqliteConversationRepository(database_path)
 
     encryptor = AesGcmEnvelopeEncryptor(data_keys)
-    app.state.send_message = SendMessage(
-        repository, encryptor, model_client, settings.model_name
-    )
+    app.state.send_message = SendMessage(repository, encryptor, model_client, settings.model_name)
     app.state.conversations = ConversationService(repository, encryptor)
     app.state.model_options = model_options
     app.state.custom_openrouter_model_allowed = settings.allow_custom_openrouter_model
+    app.state.model_backend = settings.model_backend.value
+    app.state.storage_label = (
+        "Encrypted local database"
+        if settings.storage_backend is StorageBackend.LOCAL
+        else "Envelope encrypted S3"
+        if settings.storage_backend is StorageBackend.S3
+        else "Encrypted in-memory session"
+    )
     app.include_router(router, prefix="/v1")
     return app

@@ -7,9 +7,10 @@ data flows, identity providers, model providers or deployment boundaries change.
 
 The highest-value assets are message plaintext, encryption keys, authentication
 tokens, user memory, model prompts and responses, and infrastructure credentials.
-Ciphertext in S3 crosses the application-to-AWS boundary. A request to OpenRouter
-crosses an external-provider boundary. A request to the private GPU crosses the
-application-to-inference boundary but remains inside the VPC.
+Default ciphertext stays in local SQLite while its master key is protected by
+Windows DPAPI. A request to OpenRouter crosses an external-provider boundary. A
+request to the optional private GPU crosses the application-to-inference boundary
+but remains inside the VPC.
 
 The browser and public API are untrusted entry points. The application runtime,
 AWS account, CI system, administrators, OpenRouter and private inference host are
@@ -22,10 +23,10 @@ zone's privileges.
 | --- | --- | --- | --- |
 | Unauthorised account access | Plaintext conversation disclosure | Strong identity provider, MFA, short sessions, server-side authorisation on every object | Add rate limits and anomalous-login alerts |
 | Public model endpoint exposure | Prompt theft or arbitrary GPU use | No public GPU IP, isolated subnet, security-group identity allow-list | Continuously audit network configuration |
-| Storage disclosure | Conversation or memory exposure | Application envelope encryption, KMS, S3 Block Public Access, TLS-only bucket policy | State and backups also need access reviews |
+| Local storage disclosure | Conversation content exposure | Application envelope encryption, DPAPI current-user master key, BitLocker | Malware running as the same user can decrypt; metadata and backups need review |
 | Key misuse | Bulk decryption | Separate KMS/data policy, least-privilege runtime role, CloudTrail | Add alerting for unusual decrypt volume |
 | Prompt leakage through logs | Sensitive plaintext retained outside intended storage | Structured redaction, no request bodies in logs, regression tests | Third-party libraries require review |
-| OpenRouter policy drift | Data reaches an unapproved provider or retention mode | Fail-closed adapter with ZDR/provider rules, contract tests | Provider claims and terms require periodic review |
+| OpenRouter policy drift | Data reaches an unapproved provider or retention mode | Fail-closed model/provider route, ZDR preflight and contract tests | Provider claims and terms require periodic review |
 | Prompt injection | Model follows hostile content and discloses context or invokes tools | Treat content as untrusted, minimise context, tool allow-lists, explicit confirmation | Models cannot provide a complete security boundary |
 | Summary or memory drift | Incorrect details persist and influence later answers | Preserve source transcript, provenance links, regenerate from sources, correction/deletion UI | Inferred memories must remain visibly labelled |
 | Compromised inference image | Model data or credentials exfiltrated | Vetted pre-baked AMI, no general egress, IMDSv2, minimal instance role, patch process | Establish signed-image promotion and vulnerability scanning |
@@ -45,9 +46,10 @@ expiry rather than an indefinite exception.
 ## Security assumptions
 
 - AWS account administrators are trusted but auditable.
+- The Windows account is trusted to unlock the DPAPI-protected local key; loss of
+  that account makes local transcripts unrecoverable because no recovery export exists.
 - Application plaintext exists briefly in process memory to serve a request.
 - TLS terminates only at an approved managed endpoint or application service.
 - A private subnet reduces reachability; it does not make vulnerable software safe.
-- The optional external model path is less private than local inference and must be
-  an explicit, visible user choice.
-
+- The default external model path is privacy-restricted rather than private:
+  OpenRouter and the pinned provider receive plaintext during inference.

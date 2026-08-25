@@ -7,6 +7,7 @@ is converted into these small, immutable domain values.
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from decimal import Decimal
 from enum import StrEnum
 from uuid import UUID, uuid4
 
@@ -17,6 +18,54 @@ class Role(StrEnum):
     USER = "user"
     ASSISTANT = "assistant"
     SYSTEM = "system"
+
+
+class CostBasis(StrEnum):
+    """How a turn's monetary amount was obtained."""
+
+    PROVIDER_REPORTED = "provider_reported"
+    SELF_HOSTED_UNALLOCATED = "self_hosted_unallocated"
+    UNAVAILABLE = "unavailable"
+
+
+@dataclass(frozen=True, slots=True)
+class TurnUsage:
+    """Provider usage for one request, shared by its user and assistant messages."""
+
+    input_tokens: int | None
+    output_tokens: int | None
+    total_tokens: int | None
+    cached_input_tokens: int | None
+    cache_write_input_tokens: int | None
+    reasoning_tokens: int | None
+    cost_usd: Decimal | None
+    cost_basis: CostBasis
+    model: str
+    provider: str
+
+    def __post_init__(self) -> None:
+        for value in (
+            self.input_tokens,
+            self.output_tokens,
+            self.total_tokens,
+            self.cached_input_tokens,
+            self.cache_write_input_tokens,
+            self.reasoning_tokens,
+        ):
+            if value is not None and (
+                isinstance(value, bool) or not isinstance(value, int) or value < 0
+            ):
+                raise ValueError("Token counts must be non-negative integers")
+        if self.cost_usd is not None and self.cost_usd < 0:
+            raise ValueError("Cost must be non-negative")
+        if self.cost_basis is CostBasis.PROVIDER_REPORTED and self.cost_usd is None:
+            raise ValueError("Provider-reported usage requires a cost")
+        if self.cost_basis is not CostBasis.PROVIDER_REPORTED and self.cost_usd is not None:
+            raise ValueError("Only provider-reported usage may carry a cost")
+
+    @classmethod
+    def unavailable(cls, *, model: str, provider: str) -> "TurnUsage":
+        return cls(None, None, None, None, None, None, None, CostBasis.UNAVAILABLE, model, provider)
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,6 +103,7 @@ class ChatMessage:
     content: str
     id: UUID
     created_at: datetime
+    usage: TurnUsage | None = None
 
     @classmethod
     def create(cls, role: Role, content: str) -> "ChatMessage":
@@ -84,6 +134,7 @@ class ModelResponse:
     content: str
     model: str
     provider: str
+    usage: TurnUsage | None = None
 
 
 @dataclass(frozen=True, slots=True)

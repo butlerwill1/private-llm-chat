@@ -6,6 +6,7 @@ from urllib.parse import urlparse
 import httpx
 from pydantic import BaseModel, ConfigDict, SecretStr, field_validator
 
+from private_chat.adapters.usage import parse_self_hosted_usage
 from private_chat.domain.models import ModelRequest, ModelResponse
 
 
@@ -62,4 +63,9 @@ class SelfHostedModelClient:
             raise RuntimeError("Model server returned an invalid response") from exc
         if not isinstance(content, str) or not content.strip() or not isinstance(model, str):
             raise RuntimeError("Model server returned an invalid response")
-        return ModelResponse(content=content, model=model, provider="self-hosted")
+        return ModelResponse(
+            content=content,
+            model=model,
+            provider="self-hosted",
+            usage=parse_self_hosted_usage(body.get("usage"), model=model, provider="self-hosted"),
+        )

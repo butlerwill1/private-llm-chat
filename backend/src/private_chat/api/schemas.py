@@ -11,7 +11,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 from private_chat.application.conversations import ConversationView
-from private_chat.domain.models import ChatMessage, Conversation, Role
+from private_chat.domain.models import ChatMessage, Conversation, CostBasis, Role, TurnUsage
 
 
 class SendMessageRequest(BaseModel):
@@ -30,12 +30,45 @@ class ModelOptionResponse(BaseModel):
     id: str
     label: str
     backend: str
+    provider: str | None = None
 
 
 class ModelConfigurationResponse(BaseModel):
     """Non-secret controls that determine which model IDs the browser may submit."""
 
     custom_openrouter_model_allowed: bool
+    model_backend: str
+    storage_label: str
+
+
+class TurnUsageResponse(BaseModel):
+    """Request-level usage repeated on both messages in a completed turn."""
+
+    input_tokens: int | None
+    output_tokens: int | None
+    total_tokens: int | None
+    cached_input_tokens: int | None
+    cache_write_input_tokens: int | None
+    reasoning_tokens: int | None
+    cost_usd: str | None
+    cost_basis: CostBasis
+    model: str
+    provider: str
+
+    @classmethod
+    def from_domain(cls, usage: TurnUsage) -> "TurnUsageResponse":
+        return cls(
+            input_tokens=usage.input_tokens,
+            output_tokens=usage.output_tokens,
+            total_tokens=usage.total_tokens,
+            cached_input_tokens=usage.cached_input_tokens,
+            cache_write_input_tokens=usage.cache_write_input_tokens,
+            reasoning_tokens=usage.reasoning_tokens,
+            cost_usd=None if usage.cost_usd is None else str(usage.cost_usd),
+            cost_basis=usage.cost_basis,
+            model=usage.model,
+            provider=usage.provider,
+        )
 
 
 class MessageResponse(BaseModel):
@@ -45,6 +78,7 @@ class MessageResponse(BaseModel):
     role: Role
     content: str
     created_at: datetime
+    usage: TurnUsageResponse | None
 
     @classmethod
     def from_domain(cls, message: ChatMessage) -> "MessageResponse":
@@ -55,6 +89,7 @@ class MessageResponse(BaseModel):
             role=message.role,
             content=message.content,
             created_at=message.created_at,
+            usage=None if message.usage is None else TurnUsageResponse.from_domain(message.usage),
         )
 
 

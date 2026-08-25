@@ -14,3 +14,13 @@ workflows. Read the linked runbook before using a script that changes AWS state.
 Scripts do not replace Terraform. Terraform owns the long-lived infrastructure;
 the session helpers perform short-lived operational actions such as starting an
 already-created EC2 instance or opening a local tunnel.
+# Local default launcher
+
+`start-local-chat.ps1` starts the normal loopback-only application: encrypted
+local SQLite storage plus privacy-restricted OpenRouter inference. It does not
+create, start or contact AWS resources. Copy `backend/.env.example` to
+`backend/.env`, set the OpenRouter API key, then run it from the repository root.
+
+The key in `.env` is plaintext but ignored by Git; treat it as a spend-capable
+credential. The conversation-encryption key is stored separately using Windows
+DPAPI and has no recovery export.

@@ -35,6 +35,14 @@ def get_custom_model_allowed(request: Request) -> bool:
     return cast(bool, request.app.state.custom_openrouter_model_allowed)
 
 
+def get_model_backend(request: Request) -> str:
+    return cast(str, request.app.state.model_backend)
+
+
+def get_storage_label(request: Request) -> str:
+    return cast(str, request.app.state.storage_label)
+
+
 @router.get("/health", response_model=HealthResponse)
 async def health() -> HealthResponse:
     return HealthResponse(status="ok")
@@ -47,7 +55,9 @@ async def list_models(
     """Return only the approved model catalogue for this local session."""
 
     return tuple(
-        ModelOptionResponse(id=item.id, label=item.label, backend=item.backend)
+        ModelOptionResponse(
+            id=item.id, label=item.label, backend=item.backend, provider=item.provider
+        )
         for item in options
     )
 
@@ -55,10 +65,16 @@ async def list_models(
 @router.get("/model-configuration", response_model=ModelConfigurationResponse)
 async def model_configuration(
     custom_model_allowed: Annotated[bool, Depends(get_custom_model_allowed)],
+    model_backend: Annotated[str, Depends(get_model_backend)],
+    storage_label: Annotated[str, Depends(get_storage_label)],
 ) -> ModelConfigurationResponse:
     """Tell the browser whether typed OpenRouter model IDs are enabled locally."""
 
-    return ModelConfigurationResponse(custom_openrouter_model_allowed=custom_model_allowed)
+    return ModelConfigurationResponse(
+        custom_openrouter_model_allowed=custom_model_allowed,
+        model_backend=model_backend,
+        storage_label=storage_label,
+    )
 
 
 @router.get("/conversations", response_model=tuple[ConversationResponse, ...])
@@ -103,9 +119,7 @@ async def get_conversation(
     return ConversationResponse.from_view(view)
 
 
-@router.delete(
-    "/conversations/{conversation_id}", status_code=status.HTTP_204_NO_CONTENT
-)
+@router.delete("/conversations/{conversation_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_conversation(
     conversation_id: UUID,
     service: Annotated[ConversationService, Depends(get_conversations)],
