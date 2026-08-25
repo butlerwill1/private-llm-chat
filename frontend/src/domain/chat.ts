@@ -1,4 +1,4 @@
-export type MessageAuthor = 'assistant' | 'user'
+export type MessageAuthor = 'assistant' | 'user' | 'event'
 export type CostBasis = 'provider_reported' | 'self_hosted_unallocated' | 'unavailable'
 
 export interface TurnUsage {
@@ -11,6 +11,7 @@ export interface TurnUsage {
   readonly costUsd: string | null
   readonly costBasis: CostBasis
   readonly model: string
+  readonly modelLabel: string
   readonly provider: string
 }
 
@@ -24,12 +25,14 @@ export interface ChatMessage {
 export interface Conversation {
   readonly id: string
   readonly title: string
+  readonly activeModelId: string | null
   readonly messages: readonly ChatMessage[]
 }
 
 export interface ConversationSummary {
   readonly id: string
   readonly title: string
+  readonly activeModelId: string | null
 }
 
 export interface ModelOption {
@@ -37,6 +40,7 @@ export interface ModelOption {
   readonly label: string
   readonly backend: 'self_hosted' | 'openrouter' | 'test'
   readonly provider: string | null
+  readonly available: boolean
 }
 
 export interface ModelConfiguration {
@@ -48,8 +52,9 @@ export interface ModelConfiguration {
 export interface SendMessageRequest {
   readonly conversationId: string
   readonly body: string
-  readonly modelId: string
 }
+
+export interface CreateConversationRequest { readonly modelId: string }
 
 export interface ChatApi {
   listConversations(): Promise<readonly Conversation[]>
@@ -57,7 +62,8 @@ export interface ChatApi {
   getConversation(conversationId: string): Promise<Conversation>
   listModels(): Promise<readonly ModelOption[]>
   getModelConfiguration(): Promise<ModelConfiguration>
-  createConversation(): Promise<Conversation>
+  createConversation(request: CreateConversationRequest): Promise<Conversation>
+  changeModel(conversationId: string, modelId: string): Promise<Conversation>
   sendMessage(request: SendMessageRequest): Promise<Conversation>
   deleteConversation(conversationId: string): Promise<void>
 }

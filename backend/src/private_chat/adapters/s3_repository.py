@@ -85,14 +85,20 @@ class ConversationDocument(BaseModel):
     """One versioned S3 object containing metadata and an authoritative transcript."""
 
     model_config = ConfigDict(extra="forbid")
-    schema_version: int = 1
+    schema_version: int = 2
     id: UUID
     title: str
     created_at: datetime
+    active_model_id: str | None = None
     messages: list[StoredMessageRecord]
 
     def conversation(self) -> Conversation:
-        return Conversation(id=self.id, title=self.title, created_at=self.created_at)
+        return Conversation(
+            id=self.id,
+            title=self.title,
+            created_at=self.created_at,
+            active_model_id=self.active_model_id,
+        )
 
 
 class S3ConversationRepository:
@@ -130,9 +136,7 @@ class S3ConversationRepository:
 
     def _get(self, conversation_id: UUID) -> tuple[ConversationDocument, str] | None:
         try:
-            response = self._client.get_object(
-                Bucket=self._bucket, Key=self._key(conversation_id)
-            )
+            response = self._client.get_object(Bucket=self._bucket, Key=self._key(conversation_id))
         except ClientError as error:
             if self._is_missing(error):
                 return None
@@ -145,6 +149,7 @@ class S3ConversationRepository:
             id=conversation.id,
             title=conversation.title,
             created_at=conversation.created_at,
+            active_model_id=conversation.active_model_id,
             messages=[],
         )
         try:
@@ -198,9 +203,7 @@ class S3ConversationRepository:
                 if not page.get("IsTruncated"):
                     break
                 continuation_token = str(page["NextContinuationToken"])
-            return tuple(
-                sorted(conversations, key=lambda item: item.created_at, reverse=True)
-            )
+            return tuple(sorted(conversations, key=lambda item: item.created_at, reverse=True))
 
         return await asyncio.to_thread(load_all)
 
@@ -237,6 +240,36 @@ class S3ConversationRepository:
                         StoredMessageRecord.from_domain(user),
                         StoredMessageRecord.from_domain(assistant),
                     ]
+                }
+            )
+            try:
+                await asyncio.to_thread(
+                    self._put, self._key(conversation_id), updated, IfMatch=etag
+                )
+                return
+            except ClientError as error:
+                if str(error.response.get("Error", {}).get("Code")) not in {
+                    "PreconditionFailed",
+                    "412",
+                }:
+                    raise
+        raise RuntimeError("Conversation changed repeatedly; retry the request")
+
+    async def change_active_model(
+        self, conversation_id: UUID, model_id: str, event: StoredMessage
+    ) -> None:
+        if event.conversation_id != conversation_id:
+            raise ValueError("Stored event does not belong to the target conversation")
+        for _ in range(3):
+            result = await asyncio.to_thread(self._get, conversation_id)
+            if result is None:
+                raise KeyError("Conversation does not exist")
+            document, etag = result
+            updated = document.model_copy(
+                update={
+                    "schema_version": 2,
+                    "active_model_id": model_id,
+                    "messages": [*document.messages, StoredMessageRecord.from_domain(event)],
                 }
             )
             try:

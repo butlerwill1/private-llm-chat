@@ -45,6 +45,7 @@ button:focus-visible, textarea:focus-visible, select:focus-visible, summary:focu
 .conversation-header { display: flex; align-items: flex-start; justify-content: space-between; padding: 111px 51px 0 49px; }
 .conversation-header h1 { margin: 0; font-family: Georgia, "Times New Roman", serif; font-size: 38px; font-weight: 400; line-height: 1.15; letter-spacing: -0.025em; }
 .conversation-actions { display: flex; align-items: center; gap: 24px; }
+.conversation-model { max-width: 240px; height: 36px; padding: 0 30px 0 10px; border: 1px solid var(--line); border-radius: 6px; background: #fff; }
 .delete-conversation { padding: 8px 0; border: 0; color: #8a2323; background: transparent; cursor: pointer; }
 .delete-conversation:hover { text-decoration: underline; }
 .privacy-details { position: relative; color: var(--green); }
@@ -63,6 +64,13 @@ button:focus-visible, textarea:focus-visible, select:focus-visible, summary:focu
 .message-content strong { display: block; margin-bottom: 10px; font-size: 21px; font-weight: 600; line-height: 1.2; }
 .message-content p { margin: 0; }
 .message-content .message-usage { margin-top: 14px; color: var(--muted); font-family: "Cascadia Code", Consolas, monospace; font-size: 12px; line-height: 1.45; }
+.message-content .message-usage-details { margin: -6px 0 16px; color: var(--muted); font-size: 12px; line-height: 1.45; }
+.message-usage-details summary { width: fit-content; cursor: pointer; color: inherit; }
+.message-usage-details dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 10px 0; }
+.message-usage-details dl > div { padding: 8px; border: 1px solid var(--line); border-radius: 8px; background: color-mix(in srgb, var(--panel) 62%, transparent); }
+.message-usage-details dt { margin-bottom: 2px; font-size: 11px; }
+.message-usage-details dd { margin: 0; color: var(--ink); font-family: "Cascadia Code", Consolas, monospace; }
+.message-usage-details p { margin: 6px 0; }
 .message-content > :not(strong) { margin: 0 0 16px; }
 .message-content > :last-child { margin-bottom: 0; }
 .message-content h1, .message-content h2, .message-content h3 { margin-top: 0; font-family: Georgia, "Times New Roman", serif; line-height: 1.2; }
@@ -74,6 +82,8 @@ button:focus-visible, textarea:focus-visible, select:focus-visible, summary:focu
 .message-content a { color: var(--green); text-decoration-thickness: 1px; text-underline-offset: 3px; }
 .message--user { align-self: flex-end; width: min(540px, 65%); padding: 31px 38px 28px; border-radius: 9px; background: var(--user-surface); }
 .message--user .message-content { padding: 0; }
+.message--event { align-self: center; max-width: 80%; padding: 8px 14px; border-radius: 999px; color: var(--muted); background: var(--green-soft); font-size: 13px; text-align: center; }
+.message--event .message-content { padding: 0; font-size: inherit; }
 
 .composer-area { width: calc(100% - 82px); max-width: 1058px; padding-bottom: 49px; margin: 0 auto; }
 .composer { display: grid; grid-template-columns: minmax(0, 1fr) 234px 50px; align-items: center; min-height: 100px; border: 1px solid #aeb2b0; border-radius: 10px; background: #fff; }

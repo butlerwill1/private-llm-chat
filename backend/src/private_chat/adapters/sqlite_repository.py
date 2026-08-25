@@ -13,7 +13,7 @@ from private_chat.domain.models import Conversation, EncryptedPayload, Role, Sto
 class SqliteConversationRepository:
     """Store transcript ciphertext locally; plaintext never reaches SQLite."""
 
-    _schema_version = 1
+    _schema_version = 2
 
     def __init__(self, database_path: Path) -> None:
         self._path = database_path
@@ -32,7 +32,7 @@ class SqliteConversationRepository:
         connection = self._connect()
         try:
             version = int(connection.execute("PRAGMA user_version").fetchone()[0])
-            if version not in (0, self._schema_version):
+            if version not in (0, 1, self._schema_version):
                 raise RuntimeError(f"Unsupported local conversation schema version {version}")
             connection.execute("PRAGMA journal_mode = WAL")
             if version == 0:
@@ -42,7 +42,8 @@ class SqliteConversationRepository:
                     CREATE TABLE conversations (
                         id TEXT PRIMARY KEY,
                         title TEXT NOT NULL,
-                        created_at TEXT NOT NULL
+                        created_at TEXT NOT NULL,
+                        active_model_id TEXT
                     );
                     CREATE TABLE messages (
                         id TEXT PRIMARY KEY,
@@ -60,7 +61,16 @@ class SqliteConversationRepository:
                     );
                     CREATE INDEX messages_conversation_position
                         ON messages(conversation_id, position);
-                    PRAGMA user_version = 1;
+                    PRAGMA user_version = 2;
+                    COMMIT;
+                    """
+                )
+            elif version == 1:
+                connection.executescript(
+                    """
+                    BEGIN;
+                    ALTER TABLE conversations ADD COLUMN active_model_id TEXT;
+                    PRAGMA user_version = 2;
                     COMMIT;
                     """
                 )
@@ -70,7 +80,10 @@ class SqliteConversationRepository:
     @staticmethod
     def _conversation(row: sqlite3.Row) -> Conversation:
         return Conversation(
-            UUID(str(row["id"])), str(row["title"]), datetime.fromisoformat(str(row["created_at"]))
+            UUID(str(row["id"])),
+            str(row["title"]),
+            datetime.fromisoformat(str(row["created_at"])),
+            None if row["active_model_id"] is None else str(row["active_model_id"]),
         )
 
     @staticmethod
@@ -94,8 +107,14 @@ class SqliteConversationRepository:
             connection = self._connect()
             try:
                 connection.execute(
-                    "INSERT INTO conversations(id, title, created_at) VALUES (?, ?, ?)",
-                    (str(conversation.id), conversation.title, conversation.created_at.isoformat()),
+                    "INSERT INTO conversations(id, title, created_at, active_model_id) "
+                    "VALUES (?, ?, ?, ?)",
+                    (
+                        str(conversation.id),
+                        conversation.title,
+                        conversation.created_at.isoformat(),
+                        conversation.active_model_id,
+                    ),
                 )
             except sqlite3.IntegrityError as error:
                 raise ValueError("Conversation already exists") from error
@@ -109,7 +128,8 @@ class SqliteConversationRepository:
             connection = self._connect()
             try:
                 rows = connection.execute(
-                    "SELECT id, title, created_at FROM conversations ORDER BY created_at DESC"
+                    "SELECT id, title, created_at, active_model_id FROM conversations "
+                    "ORDER BY created_at DESC"
                 ).fetchall()
                 return tuple(self._conversation(row) for row in rows)
             finally:
@@ -122,7 +142,7 @@ class SqliteConversationRepository:
             connection = self._connect()
             try:
                 row = connection.execute(
-                    "SELECT id, title, created_at FROM conversations WHERE id = ?",
+                    "SELECT id, title, created_at, active_model_id FROM conversations WHERE id = ?",
                     (str(conversation_id),),
                 ).fetchone()
                 return None if row is None else self._conversation(row)
@@ -209,6 +229,61 @@ class SqliteConversationRepository:
                 connection.close()
 
         await asyncio.to_thread(append)
+
+    async def change_active_model(
+        self, conversation_id: UUID, model_id: str, event: StoredMessage
+    ) -> None:
+        if event.conversation_id != conversation_id:
+            raise ValueError("Stored event does not belong to the target conversation")
+
+        def change() -> None:
+            connection = self._connect()
+            try:
+                connection.execute("BEGIN IMMEDIATE")
+                if (
+                    connection.execute(
+                        "SELECT 1 FROM conversations WHERE id = ?", (str(conversation_id),)
+                    ).fetchone()
+                    is None
+                ):
+                    raise KeyError("Conversation does not exist")
+                position = int(
+                    connection.execute(
+                        "SELECT COALESCE(MAX(position), -1) + 1 FROM messages "
+                        "WHERE conversation_id = ?",
+                        (str(conversation_id),),
+                    ).fetchone()[0]
+                )
+                payload = event.encrypted_content
+                connection.execute(
+                    "UPDATE conversations SET active_model_id = ? WHERE id = ?",
+                    (model_id, str(conversation_id)),
+                )
+                connection.execute(
+                    "INSERT INTO messages(id, conversation_id, position, role, ciphertext, nonce, "
+                    "wrapped_data_key, key_id, algorithm, created_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        str(event.id),
+                        str(conversation_id),
+                        position,
+                        event.role.value,
+                        payload.ciphertext,
+                        payload.nonce,
+                        payload.wrapped_data_key,
+                        payload.key_id,
+                        payload.algorithm,
+                        event.created_at.isoformat(),
+                    ),
+                )
+                connection.execute("COMMIT")
+            except BaseException:
+                connection.execute("ROLLBACK")
+                raise
+            finally:
+                connection.close()
+
+        await asyncio.to_thread(change)
 
     async def delete_conversation(self, conversation_id: UUID) -> bool:
         def delete() -> bool:

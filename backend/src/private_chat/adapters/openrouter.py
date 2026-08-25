@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
 
 from private_chat.adapters.usage import parse_generation_usage, parse_openrouter_usage
 from private_chat.domain.models import ModelRequest, ModelResponse
+from private_chat.ports.interfaces import ModelProviderError
 
 
 class OpenRouterConfiguration(BaseModel):
@@ -14,6 +15,7 @@ class OpenRouterConfiguration(BaseModel):
     model_config = ConfigDict(frozen=True)
     api_key: SecretStr
     allowed_providers: tuple[str, ...] = Field(min_length=1)
+    allowed_provider_names: tuple[str, ...] | None = Field(default=None, min_length=1)
     base_url: str = "https://openrouter.ai/api/v1"
     zero_data_retention: bool = True
     max_output_tokens: int = Field(default=4096, ge=1, le=4096)
@@ -62,21 +64,27 @@ class OpenRouterModelClient:
             headers={"Authorization": f"Bearer {self._config.api_key.get_secret_value()}"},
             json=payload,
         )
-        response.raise_for_status()
-        body = response.json()
+        try:
+            response.raise_for_status()
+            body = response.json()
+        except (httpx.HTTPStatusError, ValueError) as exc:
+            raise ModelProviderError("OpenRouter request failed") from exc
         if not isinstance(body, Mapping):
-            raise RuntimeError("OpenRouter returned an invalid response")
+            raise ModelProviderError("OpenRouter returned an invalid response")
         provider = body.get("provider")
-        # A missing provider cannot prove that the allow-list was honoured, so it is rejected.
-        if not isinstance(provider, str) or provider not in self._config.allowed_providers:
-            raise RuntimeError("OpenRouter response did not confirm an allowed provider")
+        # Routing uses endpoint slugs (for example ``google-vertex``), while the
+        # completion response uses provider display names (for example ``Google``).
+        # Keep both allowlists explicit rather than comparing unlike identifiers.
+        provider_names = self._config.allowed_provider_names or self._config.allowed_providers
+        if not isinstance(provider, str) or provider not in provider_names:
+            raise ModelProviderError("OpenRouter response did not confirm an allowed provider")
         try:
             content = body["choices"][0]["message"]["content"]
             model = body["model"]
         except (KeyError, IndexError, TypeError) as exc:
-            raise RuntimeError("OpenRouter returned an invalid response") from exc
+            raise ModelProviderError("OpenRouter returned an invalid response") from exc
         if not isinstance(content, str) or not content.strip() or not isinstance(model, str):
-            raise RuntimeError("OpenRouter returned an invalid response")
+            raise ModelProviderError("OpenRouter returned an invalid response")
         usage = parse_openrouter_usage(body.get("usage"), model=model, provider=provider)
         if usage is None:
             generation_id = response.headers.get("x-generation-id") or body.get("id")
@@ -102,12 +110,17 @@ class OpenRouterModelClient:
         if not isinstance(entries, list):
             raise RuntimeError("OpenRouter returned an invalid ZDR endpoint catalogue")
         allowed = set(self._config.allowed_providers)
+        provider_names = set(self._config.allowed_provider_names or self._config.allowed_providers)
         for entry in entries:
             if not isinstance(entry, Mapping) or entry.get("model_id") != model_id:
                 continue
             tag = entry.get("tag")
             provider = str(tag).split("/", 1)[0] if isinstance(tag, str) else ""
-            if provider in allowed and entry.get("status", 0) == 0:
+            if (
+                provider in allowed
+                and entry.get("provider_name") in provider_names
+                and entry.get("status", 0) == 0
+            ):
                 return
         raise RuntimeError(
             "No configured OpenRouter provider currently offers a verified ZDR route for "

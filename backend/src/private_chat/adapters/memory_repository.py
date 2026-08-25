@@ -44,6 +44,23 @@ class InMemoryConversationRepository:
                 raise KeyError("Conversation does not exist")
             self._messages[conversation_id].extend((user, assistant))
 
+    async def change_active_model(
+        self, conversation_id: UUID, model_id: str, event: StoredMessage
+    ) -> None:
+        if event.conversation_id != conversation_id:
+            raise ValueError("Stored event does not belong to the target conversation")
+        async with self._lock:
+            conversation = self._conversations.get(conversation_id)
+            if conversation is None:
+                raise KeyError("Conversation does not exist")
+            self._conversations[conversation_id] = Conversation(
+                id=conversation.id,
+                title=conversation.title,
+                created_at=conversation.created_at,
+                active_model_id=model_id,
+            )
+            self._messages[conversation_id].append(event)
+
     async def delete_conversation(self, conversation_id: UUID) -> bool:
         async with self._lock:
             if self._conversations.pop(conversation_id, None) is None:

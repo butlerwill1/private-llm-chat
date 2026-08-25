@@ -39,6 +39,7 @@ describe('MessageList', () => {
       costUsd: '0.002341',
       costBasis: 'provider_reported' as const,
       model: 'provider/model',
+      modelLabel: 'Provider Model',
       provider: 'provider',
     }
     render(<MessageList messages={[
@@ -47,6 +48,16 @@ describe('MessageList', () => {
     ]} />)
 
     expect(screen.getByText('Request input: 1,284 tokens · 1,024 cached · Shared turn cost: $0.002341')).toBeVisible()
-    expect(screen.getByText('Response output: 96 tokens · 18 reasoning · Shared turn cost: $0.002341')).toBeVisible()
+    expect(screen.getByText('Provider Model · Response output: 96 tokens · 18 reasoning · Shared turn cost: $0.002341')).toBeVisible()
+    expect(screen.getAllByText('Token and cost breakdown')).toHaveLength(2)
+    expect(screen.getAllByText('Cached input read')).toHaveLength(2)
+    expect(screen.getAllByText('1,024 tokens')).toHaveLength(2)
+    expect(screen.getAllByText('Cache write')).toHaveLength(2)
+    expect(screen.getAllByText('0 tokens')).toHaveLength(2)
+    expect(screen.getAllByText('Total tokens')).toHaveLength(2)
+    expect(screen.getAllByText('1,380 tokens')).toHaveLength(2)
+    expect(screen.getAllByText('Charged total')).toHaveLength(2)
+    expect(screen.getAllByText('$0.002341')).toHaveLength(2)
+    expect(screen.getAllByText(/must be counted only once/)).toHaveLength(2)
   })
 })

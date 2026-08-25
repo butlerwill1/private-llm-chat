@@ -7,6 +7,7 @@ import httpx
 from fastapi import FastAPI
 
 from private_chat.adapters.aws_kms import KmsDataKeyProvider
+from private_chat.adapters.conversation_instructions import FileConversationInstructionsProvider
 from private_chat.adapters.encryption import AesGcmEnvelopeEncryptor, LocalAesDataKeyProvider
 from private_chat.adapters.memory_repository import InMemoryConversationRepository
 from private_chat.adapters.openrouter import OpenRouterConfiguration, OpenRouterModelClient
@@ -16,7 +17,7 @@ from private_chat.adapters.sqlite_repository import SqliteConversationRepository
 from private_chat.adapters.windows_dpapi import DpapiLocalDataKeyProvider
 from private_chat.api.routes import router
 from private_chat.application.conversations import ConversationService
-from private_chat.application.model_router import ModelOption, ModelRouter
+from private_chat.application.model_router import ConfiguredModelCatalog, ModelOption, ModelRouter
 from private_chat.application.send_message import SendMessage
 from private_chat.config import LocalKeyMode, ModelBackend, Settings, StorageBackend
 from private_chat.ports.interfaces import (
@@ -99,6 +100,7 @@ def create_app(
                     OpenRouterConfiguration(
                         api_key=settings.openrouter_api_key,
                         allowed_providers=(route.provider,),
+                        allowed_provider_names=(route.provider_name,),
                         max_output_tokens=settings.openrouter_max_output_tokens,
                     ),
                     client,
@@ -116,9 +118,7 @@ def create_app(
             if settings.model_backend is ModelBackend.SELF_HOSTED
             else []
         ) + tuple(
-            ModelOption(
-                route.model_id, f"OpenRouter ZDR: {route.label}", "openrouter", route.provider
-            )
+            ModelOption(route.model_id, route.label, "openrouter", route.provider)
             for route in (settings.openrouter_routes if settings.enable_openrouter else ())
         )
     else:
@@ -150,9 +150,16 @@ def create_app(
         repository = SqliteConversationRepository(database_path)
 
     encryptor = AesGcmEnvelopeEncryptor(data_keys)
-    app.state.send_message = SendMessage(repository, encryptor, model_client, settings.model_name)
-    app.state.conversations = ConversationService(repository, encryptor)
-    app.state.model_options = model_options
+    catalog = ConfiguredModelCatalog(model_options)
+    instructions_provider = FileConversationInstructionsProvider(settings.instructions_file)
+    app.state.send_message = SendMessage(
+        repository, encryptor, model_client, settings.model_name, instructions_provider
+    )
+    app.state.conversations = ConversationService(
+        repository, encryptor, catalog, settings.model_name
+    )
+    app.state.model_options = catalog.list_models()
+    app.state.model_catalog = catalog
     app.state.custom_openrouter_model_allowed = settings.allow_custom_openrouter_model
     app.state.model_backend = settings.model_backend.value
     app.state.storage_label = (

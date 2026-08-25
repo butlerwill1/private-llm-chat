@@ -79,15 +79,23 @@ class Conversation:
     id: UUID
     title: str
     created_at: datetime
+    active_model_id: str | None = None
 
     @classmethod
-    def create(cls, title: str = "New conversation") -> "Conversation":
+    def create(
+        cls, title: str = "New conversation", *, active_model_id: str | None = None
+    ) -> "Conversation":
         """Create a conversation after enforcing the domain's title invariant."""
 
         cleaned_title = title.strip()
         if not cleaned_title:
             raise ValueError("Conversation title must not be blank")
-        return cls(id=uuid4(), title=cleaned_title, created_at=datetime.now(UTC))
+        return cls(
+            id=uuid4(),
+            title=cleaned_title,
+            created_at=datetime.now(UTC),
+            active_model_id=active_model_id,
+        )
 
 
 @dataclass(frozen=True, slots=True)

@@ -18,6 +18,24 @@ from private_chat.domain.models import (
 )
 
 
+class ModelProviderError(RuntimeError):
+    """A model provider returned an unusable response or rejected the request."""
+
+
+class ModelCatalog(Protocol):
+    """Approved model metadata and validation, independent of a provider API."""
+
+    def list_models(self) -> Sequence[object]:
+        """Return browser-safe configured options."""
+
+        ...
+
+    def require_model(self, model_id: str) -> object:
+        """Return an approved option or raise ``ValueError``."""
+
+        ...
+
+
 class ModelClient(Protocol):
     """Port shared by hosted and self-hosted inference adapters."""
 
@@ -57,6 +75,13 @@ class ConversationRepository(Protocol):
 
         ...
 
+    async def change_active_model(
+        self, conversation_id: UUID, model_id: str, event: StoredMessage
+    ) -> None:
+        """Atomically persist the selection and encrypted timeline event."""
+
+        ...
+
     async def delete_conversation(self, conversation_id: UUID) -> bool:
         """Delete a conversation and transcript, returning whether it existed."""
 
@@ -91,5 +116,14 @@ class DataKeyProvider(Protocol):
 
     def unwrap_data_key(self, wrapped_data_key: bytes, *, key_id: str, context: bytes) -> bytes:
         """Recover data-key bytes only when key identity and context are authorised."""
+
+        ...
+
+
+class ConversationInstructionsProvider(Protocol):
+    """Supplies optional local instructions without exposing their storage."""
+
+    def instructions(self) -> str | None:
+        """Return non-empty instructions or ``None`` when not configured."""
 
         ...

@@ -2,7 +2,7 @@ import type { ChatApi, ChatMessage, Conversation, ConversationSummary, CostBasis
 
 interface ApiMessage {
   readonly id: string
-  readonly role: 'assistant' | 'user'
+  readonly role: 'assistant' | 'user' | 'system'
   readonly content: string
   readonly usage: ApiTurnUsage | null
 }
@@ -17,18 +17,21 @@ interface ApiTurnUsage {
   readonly cost_usd: string | null
   readonly cost_basis: CostBasis
   readonly model: string
+  readonly model_label: string
   readonly provider: string
 }
 
 interface ApiConversation {
   readonly id: string
   readonly title: string
+  readonly active_model_id: string | null
   readonly messages: readonly ApiMessage[]
 }
 
 interface ApiConversationSummary {
   readonly id: string
   readonly title: string
+  readonly active_model_id: string | null
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -37,7 +40,7 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 function parseMessage(value: unknown): ApiMessage {
   if (!isRecord(value)
     || typeof value.id !== 'string'
-    || (value.role !== 'assistant' && value.role !== 'user')
+    || (value.role !== 'assistant' && value.role !== 'user' && value.role !== 'system')
     || typeof value.content !== 'string'
     || !(value.usage === null || parseUsage(value.usage) !== null)) {
     throw new Error('The chat API returned an invalid message.')
@@ -62,6 +65,7 @@ function parseUsage(value: unknown): ApiTurnUsage | null {
     || !(value.cost_usd === null || (typeof value.cost_usd === 'string' && /^\d+(?:\.\d+)?$/.test(value.cost_usd)))
     || (value.cost_basis !== 'provider_reported' && value.cost_basis !== 'self_hosted_unallocated' && value.cost_basis !== 'unavailable')
     || typeof value.model !== 'string' || !value.model
+    || typeof value.model_label !== 'string' || !value.model_label
     || typeof value.provider !== 'string' || !value.provider) {
     return null
   }
@@ -72,22 +76,23 @@ function parseConversation(value: unknown): ApiConversation {
   if (!isRecord(value)
     || typeof value.id !== 'string'
     || typeof value.title !== 'string'
+    || !(typeof value.active_model_id === 'string' || value.active_model_id === null)
     || !Array.isArray(value.messages)) {
     throw new Error('The chat API returned an invalid conversation.')
   }
   return {
     id: value.id,
     title: value.title,
-    messages: value.messages.map(parseMessage),
+    active_model_id: value.active_model_id, messages: value.messages.map(parseMessage),
   }
 }
 
 const toDomain = (conversation: ApiConversation): Conversation => ({
   id: conversation.id,
-  title: conversation.title,
+  title: conversation.title, activeModelId: conversation.active_model_id,
   messages: conversation.messages.map<ChatMessage>((message) => ({
     id: message.id,
-    author: message.role,
+    author: message.role === 'system' ? 'event' : message.role,
     body: message.content,
     usage: message.usage === null ? null : {
       inputTokens: message.usage.input_tokens,
@@ -99,6 +104,7 @@ const toDomain = (conversation: ApiConversation): Conversation => ({
       costUsd: message.usage.cost_usd,
       costBasis: message.usage.cost_basis,
       model: message.usage.model,
+      modelLabel: message.usage.model_label,
       provider: message.usage.provider,
     },
   })),
@@ -129,12 +135,13 @@ export class HttpChatApi implements ChatApi {
   async listConversationSummaries(): Promise<readonly ConversationSummary[]> {
     const value = await readJson(await fetch(`${this.baseUrl}/conversation-summaries`))
     if (!Array.isArray(value) || value.some((item) => !isRecord(item)
-      || typeof item.id !== 'string' || typeof item.title !== 'string')) {
+      || typeof item.id !== 'string' || typeof item.title !== 'string'
+      || !(typeof item.active_model_id === 'string' || item.active_model_id === null))) {
       throw new Error('The chat API returned an invalid conversation summary list.')
     }
     return value.map((item) => {
       const summary = item as ApiConversationSummary
-      return { id: summary.id, title: summary.title }
+      return { id: summary.id, title: summary.title, activeModelId: summary.active_model_id }
     })
   }
 
@@ -150,6 +157,7 @@ export class HttpChatApi implements ChatApi {
     if (!Array.isArray(value) || value.some((item) => !isRecord(item)
       || typeof item.id !== 'string' || typeof item.label !== 'string'
       || !(typeof item.provider === 'string' || item.provider === null)
+      || typeof item.available !== 'boolean'
       || (item.backend !== 'self_hosted' && item.backend !== 'openrouter' && item.backend !== 'test'))) {
       throw new Error('The chat API returned an invalid model catalogue.')
     }
@@ -170,9 +178,9 @@ export class HttpChatApi implements ChatApi {
     }
   }
 
-  async createConversation(): Promise<Conversation> {
+  async createConversation(request: { modelId: string }): Promise<Conversation> {
     const value = await readJson(await fetch(`${this.baseUrl}/conversations`, {
-      method: 'POST',
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model_id: request.modelId }),
     }))
     return toDomain(parseConversation(value))
   }
@@ -183,8 +191,16 @@ export class HttpChatApi implements ChatApi {
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content: request.body, model_id: request.modelId }),
+        body: JSON.stringify({ content: request.body }),
       },
+    ))
+    return toDomain(parseConversation(value))
+  }
+
+  async changeModel(conversationId: string, modelId: string): Promise<Conversation> {
+    const value = await readJson(await fetch(
+      `${this.baseUrl}/conversations/${encodeURIComponent(conversationId)}/model`,
+      { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model_id: modelId }) },
     ))
     return toDomain(parseConversation(value))
   }

@@ -4,6 +4,7 @@ const starterConversations: readonly Conversation[] = [
   {
     id: 'sunday-reflection',
     title: 'Sunday reflection',
+    activeModelId: 'google/gemini-3.7-flash',
     messages: [
       { id: 'sunday-1', author: 'assistant', body: 'What would you like to reflect on?', usage: null },
       {
@@ -23,6 +24,7 @@ const starterConversations: readonly Conversation[] = [
   {
     id: 'project-decisions',
     title: 'Project decisions',
+    activeModelId: 'google/gemini-3.7-flash',
     messages: [
       { id: 'project-1', author: 'assistant', body: 'What decision would you like to work through?', usage: null },
     ],
@@ -30,6 +32,7 @@ const starterConversations: readonly Conversation[] = [
   {
     id: 'reading-notes',
     title: 'Reading notes',
+    activeModelId: 'google/gemini-3.7-flash',
     messages: [
       { id: 'reading-1', author: 'assistant', body: 'What would you like to remember from your reading?', usage: null },
     ],
@@ -46,7 +49,7 @@ export class DemoChatApi implements ChatApi {
   }
 
   listConversationSummaries(): Promise<readonly ConversationSummary[]> {
-    return Promise.resolve(this.conversations.map(({ id, title }) => ({ id, title })))
+    return Promise.resolve(this.conversations.map(({ id, title, activeModelId }) => ({ id, title, activeModelId })))
   }
 
   getConversation(conversationId: string): Promise<Conversation> {
@@ -57,8 +60,8 @@ export class DemoChatApi implements ChatApi {
 
   listModels(): Promise<readonly ModelOption[]> {
     return Promise.resolve([{
-      id: 'meta-llama/llama-3.3-70b-instruct', label: 'OpenRouter ZDR: Llama 3.3 70B',
-      backend: 'openrouter', provider: 'deepinfra',
+      id: 'google/gemini-3.7-flash', label: 'Gemini 3.7 Flash',
+      backend: 'openrouter', provider: 'google-vertex', available: true,
     }])
   }
 
@@ -70,10 +73,11 @@ export class DemoChatApi implements ChatApi {
     })
   }
 
-  async createConversation(): Promise<Conversation> {
+  async createConversation(request: { modelId: string }): Promise<Conversation> {
     const conversation: Conversation = {
       id: makeId(),
       title: 'New conversation',
+      activeModelId: request.modelId,
       messages: [{ id: makeId(), author: 'assistant', body: 'What would you like to reflect on?', usage: null }],
     }
     this.conversations = [conversation, ...this.conversations]
@@ -99,6 +103,17 @@ export class DemoChatApi implements ChatApi {
       conversation.id === updated.id ? updated : conversation,
     )
     return Promise.resolve(updated)
+  }
+
+  async changeModel(conversationId: string, modelId: string): Promise<Conversation> {
+    const current = await this.getConversation(conversationId)
+    const from = current.activeModelId ?? 'Selected model'
+    const to = (await this.listModels()).find((model) => model.id === modelId)?.label ?? modelId
+    const updated: Conversation = { ...current, activeModelId: modelId, messages: [
+      ...current.messages, { id: makeId(), author: 'event', body: `Model changed from ${from} to ${to}.`, usage: null },
+    ] }
+    this.conversations = this.conversations.map((conversation) => conversation.id === updated.id ? updated : conversation)
+    return updated
   }
 
   async deleteConversation(conversationId: string): Promise<void> {

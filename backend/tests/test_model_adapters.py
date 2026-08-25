@@ -85,8 +85,39 @@ async def test_openrouter_contract_and_privacy_payload() -> None:
         "zdr": True,
     }
     assert payload["max_tokens"] == 4096
+    assert not {"user", "session_id", "metadata", "trace"}.intersection(payload)
+    assert "HTTP-Referer" not in incoming.headers
+    assert "X-OpenRouter-Title" not in incoming.headers
     assert result.content == "answer"
     assert result.usage is None
+
+
+@pytest.mark.asyncio
+async def test_openrouter_accepts_provider_name_for_an_allowlisted_routing_slug() -> None:
+    """OpenRouter response names differ from the endpoint slugs used for routing."""
+
+    async def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "model": "google/gemini-3.7-flash",
+                "provider": "Google",
+                "choices": [{"message": {"content": "answer"}}],
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+        client = OpenRouterModelClient(
+            OpenRouterConfiguration(
+                api_key="secret",
+                allowed_providers=("google-vertex",),
+                allowed_provider_names=("Google",),
+            ),
+            http,
+        )
+        result = await client.generate(request())
+
+    assert result.provider == "Google"
 
 
 @pytest.mark.asyncio
@@ -163,20 +194,22 @@ async def test_openrouter_uses_generation_usage_fallback() -> None:
 
 @pytest.mark.asyncio
 async def test_openrouter_keeps_a_zero_cost_and_marks_malformed_usage_unavailable() -> None:
-    responses = iter((
-        {
-            "model": "test-model",
-            "provider": "trusted-provider",
-            "choices": [{"message": {"content": "free answer"}}],
-            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2, "cost": 0},
-        },
-        {
-            "model": "test-model",
-            "provider": "trusted-provider",
-            "choices": [{"message": {"content": "unknown answer"}}],
-            "usage": {"prompt_tokens": "not-a-number"},
-        },
-    ))
+    responses = iter(
+        (
+            {
+                "model": "test-model",
+                "provider": "trusted-provider",
+                "choices": [{"message": {"content": "free answer"}}],
+                "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2, "cost": 0},
+            },
+            {
+                "model": "test-model",
+                "provider": "trusted-provider",
+                "choices": [{"message": {"content": "unknown answer"}}],
+                "usage": {"prompt_tokens": "not-a-number"},
+            },
+        )
+    )
 
     async def handler(_: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json=next(responses))

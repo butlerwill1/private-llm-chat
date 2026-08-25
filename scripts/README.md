@@ -9,6 +9,7 @@ workflows. Read the linked runbook before using a script that changes AWS state.
 | `stop-gpu.ps1` | Emergency cost-control helper after a lost session. | Stops one explicitly supplied EC2 instance. |
 | `stage-model.ps1` | Downloads a pinned GGUF, verifies it and uploads it to the approved model bucket. | Creates a model object in S3; does not start a GPU. |
 | `start-openrouter-backend.ps1` | Starts FastAPI in OpenRouter-only mode. | Does not call AWS, start a GPU or create endpoints. |
+| `start-chat-app.ps1` | Starts the loopback backend and React interface, then opens the app. | Does not call AWS, start a GPU or create endpoints. |
 | `test-gpu-readiness.ps1` | Runs bounded text, vision, scheduler and GPU-utilisation checks, with automatic failure diagnostics. | Executes a read-only inference test on one already-running GPU through SSM; it does not pull models or expose a port. |
 
 Scripts do not replace Terraform. Terraform owns the long-lived infrastructure;
@@ -24,3 +25,16 @@ create, start or contact AWS resources. Copy `backend/.env.example` to
 The key in `.env` is plaintext but ignored by Git; treat it as a spend-capable
 credential. The conversation-encryption key is stored separately using Windows
 DPAPI and has no recovery export.
+
+## Start the local app
+
+After creating `backend/.env` from `backend/.env.example` and setting the
+OpenRouter key, run this once from the repository root:
+
+```powershell
+.\scripts\start-chat-app.ps1
+```
+
+The script uses the backend virtual environment when present, starts both
+loopback-only development processes hidden, writes local startup logs beneath
+the ignored `.local\runtime-logs` folder, and opens the browser interface.

@@ -11,6 +11,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 from private_chat.application.conversations import ConversationView
+from private_chat.application.model_router import ConfiguredModelCatalog
 from private_chat.domain.models import ChatMessage, Conversation, CostBasis, Role, TurnUsage
 
 
@@ -21,7 +22,16 @@ class SendMessageRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
     # Limits provide an early guard against empty input and unbounded request bodies.
     content: str = Field(min_length=1, max_length=32_000)
+
+
+class CreateConversationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     model_id: str | None = Field(default=None, min_length=1, max_length=200)
+
+
+class ChangeModelRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    model_id: str = Field(min_length=1, max_length=200)
 
 
 class ModelOptionResponse(BaseModel):
@@ -31,6 +41,7 @@ class ModelOptionResponse(BaseModel):
     label: str
     backend: str
     provider: str | None = None
+    available: bool = True
 
 
 class ModelConfigurationResponse(BaseModel):
@@ -53,10 +64,15 @@ class TurnUsageResponse(BaseModel):
     cost_usd: str | None
     cost_basis: CostBasis
     model: str
+    model_label: str
     provider: str
 
     @classmethod
-    def from_domain(cls, usage: TurnUsage) -> "TurnUsageResponse":
+    def from_domain(cls, usage: TurnUsage, catalog: ConfiguredModelCatalog) -> "TurnUsageResponse":
+        label = next(
+            (option.label for option in catalog.list_models() if option.id == usage.model),
+            usage.model,
+        )
         return cls(
             input_tokens=usage.input_tokens,
             output_tokens=usage.output_tokens,
@@ -67,6 +83,7 @@ class TurnUsageResponse(BaseModel):
             cost_usd=None if usage.cost_usd is None else str(usage.cost_usd),
             cost_basis=usage.cost_basis,
             model=usage.model,
+            model_label=label,
             provider=usage.provider,
         )
 
@@ -81,7 +98,9 @@ class MessageResponse(BaseModel):
     usage: TurnUsageResponse | None
 
     @classmethod
-    def from_domain(cls, message: ChatMessage) -> "MessageResponse":
+    def from_domain(
+        cls, message: ChatMessage, catalog: ConfiguredModelCatalog
+    ) -> "MessageResponse":
         """Map a domain object to the API contract without exposing internals."""
 
         return cls(
@@ -89,7 +108,9 @@ class MessageResponse(BaseModel):
             role=message.role,
             content=message.content,
             created_at=message.created_at,
-            usage=None if message.usage is None else TurnUsageResponse.from_domain(message.usage),
+            usage=None
+            if message.usage is None
+            else TurnUsageResponse.from_domain(message.usage, catalog),
         )
 
 
@@ -99,15 +120,21 @@ class ConversationResponse(BaseModel):
     id: UUID
     title: str
     created_at: datetime
+    active_model_id: str | None
     messages: tuple[MessageResponse, ...]
 
     @classmethod
-    def from_view(cls, view: ConversationView) -> "ConversationResponse":
+    def from_view(
+        cls, view: ConversationView, catalog: ConfiguredModelCatalog
+    ) -> "ConversationResponse":
         return cls(
             id=view.conversation.id,
             title=view.conversation.title,
             created_at=view.conversation.created_at,
-            messages=tuple(MessageResponse.from_domain(message) for message in view.messages),
+            active_model_id=view.conversation.active_model_id,
+            messages=tuple(
+                MessageResponse.from_domain(message, catalog) for message in view.messages
+            ),
         )
 
 
@@ -117,6 +144,7 @@ class ConversationSummaryResponse(BaseModel):
     id: UUID
     title: str
     created_at: datetime
+    active_model_id: str | None
 
     @classmethod
     def from_domain(cls, conversation: Conversation) -> "ConversationSummaryResponse":
@@ -124,6 +152,7 @@ class ConversationSummaryResponse(BaseModel):
             id=conversation.id,
             title=conversation.title,
             created_at=conversation.created_at,
+            active_model_id=conversation.active_model_id,
         )
 
 

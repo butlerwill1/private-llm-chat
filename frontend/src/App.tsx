@@ -47,10 +47,10 @@ export function App({ api, initialConversations, initialSummaries, models, model
   const createConversation = async () => {
     setError(null)
     try {
-      const conversation = await api.createConversation()
+      const conversation = await api.createConversation({ modelId: selectedModelId })
       startTransition(() => {
         setConversations((current) => [conversation, ...current])
-        setSummaries((current) => [{ id: conversation.id, title: conversation.title }, ...current])
+        setSummaries((current) => [{ id: conversation.id, title: conversation.title, activeModelId: conversation.activeModelId }, ...current])
         setSelectedId(conversation.id)
         setSidebarOpen(false)
       })
@@ -59,12 +59,12 @@ export function App({ api, initialConversations, initialSummaries, models, model
     }
   }
 
-  const sendMessage = async (body: string, modelId: string) => {
+  const sendMessage = async (body: string) => {
     if (!selectedConversation) return
     setIsSending(true)
     setError(null)
     try {
-      const updated = await api.sendMessage({ conversationId: selectedConversation.id, body, modelId })
+      const updated = await api.sendMessage({ conversationId: selectedConversation.id, body })
       startTransition(() => {
         setConversations((current) => current.map((conversation) =>
           conversation.id === updated.id ? updated : conversation,
@@ -72,6 +72,23 @@ export function App({ api, initialConversations, initialSummaries, models, model
       })
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'The message could not be sent.')
+    } finally {
+      setIsSending(false)
+    }
+  }
+
+  const changeModel = async (modelId: string) => {
+    if (!selectedConversation || modelId === selectedConversation.activeModelId) return
+    setIsSending(true)
+    setError(null)
+    try {
+      const updated = await api.changeModel(selectedConversation.id, modelId)
+      startTransition(() => {
+        setConversations((current) => current.map((item) => item.id === updated.id ? updated : item))
+        setSummaries((current) => current.map((item) => item.id === updated.id ? { ...item, activeModelId: updated.activeModelId } : item))
+      })
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'The model could not be changed.')
     } finally {
       setIsSending(false)
     }
@@ -99,6 +116,10 @@ export function App({ api, initialConversations, initialSummaries, models, model
     return (
       <main className="empty-app">
         <p>No conversations are available.</p>
+        <label htmlFor="new-conversation-model">Model for this conversation</label>
+        <select id="new-conversation-model" value={selectedModelId} onChange={(event) => setSelectedModelId(event.target.value)}>
+          {models.map((model) => <option key={model.id} value={model.id}>{model.label}</option>)}
+        </select>
         <button type="button" onClick={() => void createConversation()}>Start a conversation</button>
         {error ? <p className="request-error" role="alert">{error}</p> : null}
       </main>
@@ -120,18 +141,22 @@ export function App({ api, initialConversations, initialSummaries, models, model
         <ConversationHeader
           title={selectedConversation?.title ?? 'Loading conversation'}
           onDelete={() => void deleteConversation()}
+          models={models}
+          activeModelId={selectedConversation?.activeModelId ?? null}
+          disabled={isSending}
+          onChangeModel={(modelId) => void changeModel(modelId)}
         />
         {selectedConversation ? <MessageList messages={selectedConversation.messages} /> : <p className="conversation-loading">Loading encrypted conversation…</p>}
         {isSending ? <p className="response-pending" role="status">The selected model is generating a response…</p> : null}
         {error ? <p className="request-error" role="alert">{error}</p> : null}
-        <Composer disabled={isSending} selectedModelId={selectedModelId} onSend={sendMessage} />
+        <Composer disabled={isSending} onSend={sendMessage} />
       </main>
       {settingsOpen ? (
         <div className="settings-backdrop" role="presentation" onClick={() => setSettingsOpen(false)}>
           <section className="settings-panel" role="dialog" aria-modal="true" aria-labelledby="settings-title" onClick={(event) => event.stopPropagation()}>
             <div className="settings-heading"><h2 id="settings-title">Session settings</h2><button type="button" onClick={() => setSettingsOpen(false)}>Close</button></div>
-            <dl><dt>Selected model</dt><dd>{models.find((item) => item.id === selectedModelId)?.label ?? selectedModelId}</dd><dt>Provider</dt><dd>{models.find((item) => item.id === selectedModelId)?.provider ?? 'Local or test adapter'}</dd><dt>Transcript storage</dt><dd>{modelConfiguration.storageLabel}</dd><dt>Inference mode</dt><dd>{modelConfiguration.modelBackend === 'openrouter' ? 'Privacy-restricted hosted inference' : 'Self-hosted inference'}</dd><dt>Response display</dt><dd>Shown once generation completes</dd></dl>
-            <label className="settings-model-label" htmlFor="settings-model">Model</label>
+            <dl><dt>New-chat model</dt><dd>{models.find((item) => item.id === selectedModelId)?.label ?? selectedModelId}</dd><dt>Provider</dt><dd>{models.find((item) => item.id === selectedModelId)?.provider ?? 'Local or test adapter'}</dd><dt>Transcript storage</dt><dd>{modelConfiguration.storageLabel}</dd><dt>Inference mode</dt><dd>{modelConfiguration.modelBackend === 'openrouter' ? 'Privacy-restricted hosted inference' : 'Self-hosted inference'}</dd><dt>Response display</dt><dd>Shown once generation completes</dd></dl>
+            <label className="settings-model-label" htmlFor="settings-model">Default for new conversations</label>
             <select id="settings-model" value={models.some((item) => item.id === selectedModelId) ? selectedModelId : ''} onChange={(event) => setSelectedModelId(event.target.value)}>
               {models.map((model) => <option key={model.id} value={model.id}>{model.label}</option>)}
               {modelConfiguration.customOpenRouterModelAllowed ? <option value="">Custom OpenRouter model ID</option> : null}

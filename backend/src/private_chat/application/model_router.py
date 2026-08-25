@@ -15,6 +15,28 @@ class ModelOption:
     label: str
     backend: str
     provider: str | None = None
+    available: bool = True
+
+
+class ConfiguredModelCatalog:
+    """Server-owned approved catalogue; clients cannot choose arbitrary routes."""
+
+    def __init__(self, options: tuple[ModelOption, ...]) -> None:
+        self._options = {option.id: option for option in options}
+        if not self._options:
+            raise ValueError("At least one configured model is required")
+
+    def list_models(self) -> tuple[ModelOption, ...]:
+        return tuple(self._options.values())
+
+    def require_model(self, model_id: str) -> ModelOption:
+        try:
+            option = self._options[model_id]
+        except KeyError as error:
+            raise ValueError("The requested model is not enabled for this session") from error
+        if not option.available:
+            raise ValueError("The requested model is currently unavailable")
+        return option
 
 
 class ModelRouter:

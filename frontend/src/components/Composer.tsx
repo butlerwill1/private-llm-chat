@@ -3,11 +3,10 @@ import { SendIcon } from './Icons'
 
 interface ComposerProps {
   readonly disabled: boolean
-  readonly selectedModelId: string
-  readonly onSend: (body: string, modelId: string) => Promise<void>
+  readonly onSend: (body: string) => Promise<void>
 }
 
-export function Composer({ disabled, selectedModelId, onSend }: ComposerProps) {
+export function Composer({ disabled, onSend }: ComposerProps) {
   const [body, setBody] = useState('')
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
@@ -15,7 +14,7 @@ export function Composer({ disabled, selectedModelId, onSend }: ComposerProps) {
     const message = body.trim()
     if (message.length === 0 || disabled) return
     setBody('')
-    await onSend(message, selectedModelId)
+    await onSend(message)
   }
 
   return (

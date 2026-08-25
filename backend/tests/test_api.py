@@ -15,6 +15,7 @@ import pytest
 from private_chat.bootstrap import create_app
 from private_chat.config import LocalKeyMode, ModelBackend, Settings, StorageBackend
 from private_chat.domain.models import ModelRequest, ModelResponse
+from private_chat.ports.interfaces import ModelProviderError
 
 
 class StubModel:
@@ -37,6 +38,11 @@ class TimingOutModel:
         # The route must translate infrastructure timeouts into a useful HTTP
         # response instead of returning an unhandled 500 to the browser.
         raise httpx.ReadTimeout("model response exceeded the configured timeout")
+
+
+class InvalidProviderResponseModel:
+    async def generate(self, request: ModelRequest) -> ModelResponse:
+        raise ModelProviderError("provider details must stay inside the API boundary")
 
 
 def make_settings() -> Settings:
@@ -97,7 +103,8 @@ async def test_api_validates_and_returns_a_turn() -> None:
         "reasoning_tokens": None,
         "cost_usd": None,
         "cost_basis": "unavailable",
-        "model": "meta-llama/llama-3.3-70b-instruct",
+        "model": "google/gemini-3.7-flash",
+        "model_label": "google/gemini-3.7-flash",
         "provider": "stub",
     }
 
@@ -163,6 +170,23 @@ async def test_api_reports_model_timeout_as_gateway_timeout() -> None:
     assert response.status_code == 504
     assert response.json()["detail"] == (
         "The local model did not respond before the inference timeout."
+    )
+
+
+@pytest.mark.asyncio
+async def test_api_reports_invalid_provider_response_as_bad_gateway() -> None:
+    app = create_app(make_settings(), model_client=InvalidProviderResponseModel())
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        created = await client.post("/v1/conversations")
+        response = await client.post(
+            f"/v1/conversations/{created.json()['id']}/messages",
+            json={"content": "hello"},
+        )
+
+    assert response.status_code == 502
+    assert response.json()["detail"] == (
+        "The selected model provider returned an unusable response. Please try again."
     )
 
 

@@ -62,6 +62,13 @@ and ignored by Git; treat it as a spend-capable credential and rotate it if expo
 - `GET /v1/models` returns the backend-approved model catalogue. The browser
   cannot use a model ID outside that catalogue unless custom OpenRouter models
   were explicitly enabled.
+- `PATCH /v1/conversations/{id}/model` changes the persistent conversation model
+  and writes an encrypted timeline event. `POST /v1/conversations` can select an
+  approved initial model. The message endpoint always uses the conversation's
+  saved model rather than accepting a provider choice from the browser.
+- `CHAT_INSTRUCTIONS_FILE` may point to an ignored local Markdown/text file.
+  Its contents are injected into inference as local system instructions, never
+  stored in the transcript or returned from an API.
 - `GET /v1/conversation-summaries` returns only sidebar metadata. It avoids
   decrypting every conversation when the interface first opens.
 

@@ -5,14 +5,18 @@ from uuid import UUID
 from private_chat.application.conversations import message_context
 from private_chat.application.message_payload import decode_message_payload, encode_message_payload
 from private_chat.domain.models import ChatMessage, ModelRequest, Role, StoredMessage, TurnUsage
-from private_chat.ports.interfaces import ConversationRepository, EnvelopeEncryptor, ModelClient
+from private_chat.ports.interfaces import (
+    ConversationInstructionsProvider,
+    ConversationRepository,
+    EnvelopeEncryptor,
+    ModelClient,
+)
 
 
 @dataclass(frozen=True, slots=True)
 class SendMessageCommand:
     conversation_id: UUID
     content: str
-    model_id: str | None = None
 
 
 class SendMessage:
@@ -23,15 +27,18 @@ class SendMessage:
         repository: ConversationRepository,
         encryptor: EnvelopeEncryptor,
         model_client: ModelClient,
-        model_name: str,
+        default_model_id: str,
+        instructions_provider: ConversationInstructionsProvider | None = None,
     ) -> None:
         self._repository = repository
         self._encryptor = encryptor
         self._model_client = model_client
-        self._model_name = model_name
+        self._default_model_id = default_model_id
+        self._instructions_provider = instructions_provider
 
     async def execute(self, command: SendMessageCommand) -> ChatMessage:
-        if await self._repository.get_conversation(command.conversation_id) is None:
+        conversation = await self._repository.get_conversation(command.conversation_id)
+        if conversation is None:
             raise KeyError("Conversation does not exist")
         user = ChatMessage.create(Role.USER, command.content)
         history_records = await self._repository.list_messages(command.conversation_id)
@@ -48,9 +55,27 @@ class SendMessage:
                 created_at=item.created_at,
             )
             for item in history_records
+            if item.role is not Role.SYSTEM
         )
+        inferred_model = next(
+            (
+                message.usage.model
+                for message in reversed(history)
+                if message.role is Role.ASSISTANT and message.usage is not None
+            ),
+            None,
+        )
+        instructions = (
+            None
+            if self._instructions_provider is None
+            else self._instructions_provider.instructions()
+        )
+        system = () if instructions is None else (ChatMessage.create(Role.SYSTEM, instructions),)
         response = await self._model_client.generate(
-            ModelRequest(messages=(*history, user), model=command.model_id or self._model_name)
+            ModelRequest(
+                messages=(*system, *history, user),
+                model=conversation.active_model_id or inferred_model or self._default_model_id,
+            )
         )
         usage = response.usage or TurnUsage.unavailable(
             model=response.model, provider=response.provider

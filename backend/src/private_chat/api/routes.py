@@ -5,16 +5,19 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 
 from private_chat.api.schemas import (
+    ChangeModelRequest,
     ConversationResponse,
     ConversationSummaryResponse,
+    CreateConversationRequest,
     HealthResponse,
     ModelConfigurationResponse,
     ModelOptionResponse,
     SendMessageRequest,
 )
 from private_chat.application.conversations import ConversationService
-from private_chat.application.model_router import ModelOption
+from private_chat.application.model_router import ConfiguredModelCatalog, ModelOption
 from private_chat.application.send_message import SendMessage, SendMessageCommand
+from private_chat.ports.interfaces import ModelProviderError
 
 router = APIRouter()
 
@@ -29,6 +32,10 @@ def get_conversations(request: Request) -> ConversationService:
 
 def get_model_options(request: Request) -> tuple[ModelOption, ...]:
     return cast(tuple[ModelOption, ...], request.app.state.model_options)
+
+
+def get_model_catalog(request: Request) -> ConfiguredModelCatalog:
+    return cast(ConfiguredModelCatalog, request.app.state.model_catalog)
 
 
 def get_custom_model_allowed(request: Request) -> bool:
@@ -56,7 +63,11 @@ async def list_models(
 
     return tuple(
         ModelOptionResponse(
-            id=item.id, label=item.label, backend=item.backend, provider=item.provider
+            id=item.id,
+            label=item.label,
+            backend=item.backend,
+            provider=item.provider,
+            available=item.available,
         )
         for item in options
     )
@@ -80,9 +91,10 @@ async def model_configuration(
 @router.get("/conversations", response_model=tuple[ConversationResponse, ...])
 async def list_conversations(
     service: Annotated[ConversationService, Depends(get_conversations)],
+    catalog: Annotated[ConfiguredModelCatalog, Depends(get_model_catalog)],
 ) -> tuple[ConversationResponse, ...]:
     views = await service.list()
-    return tuple(ConversationResponse.from_view(view) for view in views)
+    return tuple(ConversationResponse.from_view(view, catalog) for view in views)
 
 
 @router.get("/conversation-summaries", response_model=tuple[ConversationSummaryResponse, ...])
@@ -104,19 +116,50 @@ async def list_conversation_summaries(
 )
 async def create_conversation(
     service: Annotated[ConversationService, Depends(get_conversations)],
+    catalog: Annotated[ConfiguredModelCatalog, Depends(get_model_catalog)],
+    body: CreateConversationRequest | None = None,
 ) -> ConversationResponse:
-    return ConversationResponse.from_view(await service.create())
+    try:
+        return ConversationResponse.from_view(
+            await service.create(None if body is None else body.model_id), catalog
+        )
+    except ValueError as error:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(error)
+        ) from error
 
 
 @router.get("/conversations/{conversation_id}", response_model=ConversationResponse)
 async def get_conversation(
     conversation_id: UUID,
     service: Annotated[ConversationService, Depends(get_conversations)],
+    catalog: Annotated[ConfiguredModelCatalog, Depends(get_model_catalog)],
 ) -> ConversationResponse:
     view = await service.get(conversation_id)
     if view is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
-    return ConversationResponse.from_view(view)
+    return ConversationResponse.from_view(view, catalog)
+
+
+@router.patch("/conversations/{conversation_id}/model", response_model=ConversationResponse)
+async def change_model(
+    conversation_id: UUID,
+    body: ChangeModelRequest,
+    service: Annotated[ConversationService, Depends(get_conversations)],
+    catalog: Annotated[ConfiguredModelCatalog, Depends(get_model_catalog)],
+) -> ConversationResponse:
+    try:
+        return ConversationResponse.from_view(
+            await service.change_model(conversation_id, body.model_id), catalog
+        )
+    except KeyError as error:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found"
+        ) from error
+    except ValueError as error:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(error)
+        ) from error
 
 
 @router.delete("/conversations/{conversation_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -135,6 +178,7 @@ async def send_message(
     body: SendMessageRequest,
     use_case: Annotated[SendMessage, Depends(get_send_message)],
     service: Annotated[ConversationService, Depends(get_conversations)],
+    catalog: Annotated[ConfiguredModelCatalog, Depends(get_model_catalog)],
 ) -> ConversationResponse:
     # Never log `body`: it contains plaintext user content.
     try:
@@ -142,7 +186,6 @@ async def send_message(
             SendMessageCommand(
                 conversation_id=conversation_id,
                 content=body.content,
-                model_id=body.model_id,
             )
         )
     except KeyError as error:
@@ -156,7 +199,12 @@ async def send_message(
             status_code=status.HTTP_504_GATEWAY_TIMEOUT,
             detail="The local model did not respond before the inference timeout.",
         ) from error
+    except ModelProviderError as error:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="The selected model provider returned an unusable response. Please try again.",
+        ) from error
     view = await service.get(conversation_id)
     if view is None:
         raise RuntimeError("Conversation disappeared after a completed turn")
-    return ConversationResponse.from_view(view)
+    return ConversationResponse.from_view(view, catalog)

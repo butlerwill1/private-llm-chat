@@ -9,6 +9,8 @@ from pathlib import Path
 from pydantic import BaseModel, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
+
 
 class ModelBackend(StrEnum):
     OPENROUTER = "openrouter"
@@ -32,21 +34,101 @@ class OpenRouterRoute(BaseModel):
     model_config = {"frozen": True, "extra": "forbid"}
     model_id: str = Field(min_length=1)
     provider: str = Field(min_length=1)
+    provider_name: str = Field(min_length=1)
     label: str = Field(min_length=1)
 
 
 DEFAULT_OPENROUTER_ROUTES: tuple[OpenRouterRoute, ...] = (
     OpenRouterRoute(
-        model_id="meta-llama/llama-3.3-70b-instruct", provider="deepinfra", label="Llama 3.3 70B"
+        model_id="google/gemini-3.7-flash",
+        provider="google-vertex",
+        provider_name="Google",
+        label="Gemini 3.7 Flash",
     ),
-    OpenRouterRoute(model_id="qwen/qwen3-32b", provider="deepinfra", label="Qwen3 32B"),
-    OpenRouterRoute(model_id="google/gemma-3-27b-it", provider="deepinfra", label="Gemma 3 27B"),
     OpenRouterRoute(
-        model_id="mistralai/mistral-small-3.2-24b-instruct",
-        provider="deepinfra",
-        label="Mistral Small 3.2 24B",
+        model_id="mistralai/ministral-3b-2512",
+        provider="mistral",
+        provider_name="Mistral",
+        label="Ministral 3B",
     ),
-    OpenRouterRoute(model_id="deepseek/deepseek-r1", provider="novita", label="DeepSeek R1"),
+    OpenRouterRoute(
+        model_id="mistralai/ministral-14b-2512",
+        provider="mistral",
+        provider_name="Mistral",
+        label="Ministral 14B",
+    ),
+    OpenRouterRoute(
+        model_id="mistralai/mistral-small-2603",
+        provider="mistral",
+        provider_name="Mistral",
+        label="Mistral Small 3",
+    ),
+    OpenRouterRoute(
+        model_id="mistralai/mistral-medium-3-5",
+        provider="mistral",
+        provider_name="Mistral",
+        label="Mistral Medium 3.5",
+    ),
+    OpenRouterRoute(
+        model_id="mistralai/mistral-large-2512",
+        provider="mistral",
+        provider_name="Mistral",
+        label="Mistral Large",
+    ),
+    OpenRouterRoute(
+        model_id="openai/gpt-5.6-luna",
+        provider="azure",
+        provider_name="Azure",
+        label="GPT-5.6 Luna",
+    ),
+    OpenRouterRoute(
+        model_id="openai/gpt-5.6-terra",
+        provider="azure",
+        provider_name="Azure",
+        label="GPT-5.6 Terra",
+    ),
+    OpenRouterRoute(
+        model_id="openai/gpt-5.6-sol",
+        provider="azure",
+        provider_name="Azure",
+        label="GPT-5.6 Sol",
+    ),
+    OpenRouterRoute(
+        model_id="deepseek/deepseek-v4-flash",
+        provider="novita",
+        provider_name="Novita",
+        label="DeepSeek V4 Flash",
+    ),
+    OpenRouterRoute(
+        model_id="deepseek/deepseek-v4-pro",
+        provider="azure",
+        provider_name="Azure",
+        label="DeepSeek V4 Pro",
+    ),
+    OpenRouterRoute(
+        model_id="qwen/qwen3.8-27b",
+        provider="coreweave",
+        provider_name="CoreWeave",
+        label="Qwen 3.8 27B",
+    ),
+    OpenRouterRoute(
+        model_id="qwen/qwen3.8-2.4t-a95b",
+        provider="deepinfra",
+        provider_name="DeepInfra",
+        label="Qwen 3.8 2.4T A95B",
+    ),
+    OpenRouterRoute(
+        model_id="anthropic/claude-sonnet-5",
+        provider="google-vertex",
+        provider_name="Google",
+        label="Claude Sonnet 5",
+    ),
+    OpenRouterRoute(
+        model_id="anthropic/claude-opus-5",
+        provider="google-vertex",
+        provider_name="Google",
+        label="Claude Opus 5",
+    ),
 )
 
 
@@ -57,7 +139,7 @@ class Settings(BaseSettings):
 
     environment: str = "development"
     model_backend: ModelBackend = ModelBackend.OPENROUTER
-    model_name: str = DEFAULT_OPENROUTER_ROUTES[0].model_id
+    model_name: str = "google/gemini-3.7-flash"
     storage_backend: StorageBackend = StorageBackend.LOCAL
     local_data_dir: Path | None = None
     local_key_mode: LocalKeyMode = LocalKeyMode.DPAPI
@@ -74,6 +156,7 @@ class Settings(BaseSettings):
     openrouter_zdr_preflight: bool = True
     openrouter_max_output_tokens: int = Field(default=4096, ge=1, le=4096)
     allow_custom_openrouter_model: bool = False
+    instructions_file: Path | None = PROJECT_ROOT / ".local" / "conversation-instructions.md"
 
     @field_validator("local_master_key_b64")
     @classmethod

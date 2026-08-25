@@ -29,7 +29,9 @@ This repository implements the engineering foundation from the [project brief](P
 | Private GPU | Ollama on the private AWS GPU, reached through an SSM tunnel | GPU compute and temporary SSM interface endpoints | You want prompts and inference to stay in your AWS environment. |
 | Local OpenRouter (default) | A pinned ZDR OpenRouter provider over HTTPS | OpenRouter usage only; no AWS resources | You want normal hosted-model use with encrypted local storage. |
 
-Both modes use the same React interface and FastAPI API. The model selector displays only backend-approved models; an OpenRouter API key never reaches the browser. OpenRouter is privacy-restricted hosted inference, not end-to-end private inference: the approved provider receives the prompt to generate its response.
+Both modes use the same React interface and FastAPI API. The model selector is persisted per conversation and displays only backend-approved models; switches are recorded in the encrypted timeline and apply to subsequent responses. An OpenRouter API key never reaches the browser. OpenRouter is privacy-restricted hosted inference, not end-to-end private inference: the approved provider receives the prompt to generate its response.
+
+The hosted adapter sends only the model request and required routing controls. It deliberately does not attach OpenRouter's optional user, session, referral, title, trace or arbitrary metadata fields. This separates an OpenRouter account from the downstream provider, but does not make text that identifies its author anonymous.
 
 For a private GPU session, follow the [personal session runbook](ops/runbooks/personal-session.md). For OpenRouter-only mode, use the dedicated section in the same runbook.
 
@@ -90,7 +92,13 @@ python -m pip install -e ".[dev]"
 Copy-Item .env.example .env
 ```
 
-Copy the local configuration, set a real OpenRouter API key, then start the default launcher:
+Copy the local configuration, set a real OpenRouter API key, then start the full local app:
+
+```powershell
+..\scripts\start-chat-app.ps1
+```
+
+For backend-only work, use:
 
 ```powershell
 ..\scripts\start-local-chat.ps1
