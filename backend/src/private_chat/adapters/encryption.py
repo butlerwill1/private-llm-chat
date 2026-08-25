@@ -1,4 +1,5 @@
 import os
+from hashlib import sha256
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
@@ -38,12 +39,11 @@ class AesGcmEnvelopeEncryptor:
 class LocalAesDataKeyProvider:
     """Local key wrapper for development/tests; replace with an AWS KMS adapter in production."""
 
-    key_id = "local-development-key"
-
     def __init__(self, master_key: bytes) -> None:
         if len(master_key) != 32:
             raise ValueError("Local master key must contain exactly 32 bytes")
         self._master_key = master_key
+        self.key_id = f"local-aes-v1:{sha256(master_key).hexdigest()[:16]}"
 
     def generate_data_key(self, *, context: bytes) -> tuple[bytes, bytes, str]:
         data_key = os.urandom(32)
@@ -51,9 +51,7 @@ class LocalAesDataKeyProvider:
         wrapped = nonce + AESGCM(self._master_key).encrypt(nonce, data_key, context)
         return data_key, wrapped, self.key_id
 
-    def unwrap_data_key(
-        self, wrapped_data_key: bytes, *, key_id: str, context: bytes
-    ) -> bytes:
+    def unwrap_data_key(self, wrapped_data_key: bytes, *, key_id: str, context: bytes) -> bytes:
         if key_id != self.key_id:
             raise ValueError("Unknown local key identifier")
         if len(wrapped_data_key) < 13:
@@ -61,4 +59,3 @@ class LocalAesDataKeyProvider:
         return AESGCM(self._master_key).decrypt(
             wrapped_data_key[:12], wrapped_data_key[12:], context
         )
-

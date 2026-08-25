@@ -22,6 +22,7 @@ describe('HttpChatApi', () => {
         role: 'assistant',
         content: 'Private response',
         created_at: '2026-07-21T12:00:01Z',
+        usage: null,
       }],
     // JSON.stringify turns the object into the wire-format text that fetch returns.
     }]), { status: 200 }))
@@ -38,6 +39,7 @@ describe('HttpChatApi', () => {
       id: 'message-id',
       author: 'assistant',
       body: 'Private response',
+      usage: null,
     })
     // A relative URL keeps browser traffic on the local Vite/FastAPI origin and
     // avoids accidentally embedding an internet-facing API address in the UI.
@@ -60,5 +62,22 @@ describe('HttpChatApi', () => {
     await expect(new HttpChatApi().listConversations()).rejects.toThrow(
       'invalid conversation',
     )
+  })
+
+  it('rejects malformed token-cost metadata', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify([{
+      id: 'conversation-id',
+      title: 'Bad usage',
+      messages: [{
+        id: 'message-id', role: 'assistant', content: 'Private response',
+        usage: {
+          input_tokens: 1, output_tokens: 1, total_tokens: 2,
+          cached_input_tokens: null, cache_write_input_tokens: null, reasoning_tokens: null,
+          cost_usd: 0.002, cost_basis: 'provider_reported', model: 'provider/model', provider: 'provider',
+        },
+      }],
+    }]), { status: 200 })))
+
+    await expect(new HttpChatApi().listConversations()).rejects.toThrow('invalid conversation')
   })
 })

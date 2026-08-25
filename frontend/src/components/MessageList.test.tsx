@@ -10,11 +10,13 @@ describe('MessageList', () => {
           id: 'assistant-1',
           author: 'assistant',
           body: '## Useful answer\n\n**Important** detail\n\n- first point\n- second point\n\n[Safe link](https://example.com)',
+          usage: null,
         },
         {
           id: 'user-1',
           author: 'user',
           body: '<strong>This is my literal message</strong>',
+          usage: null,
         },
       ]} />,
     )
@@ -24,5 +26,27 @@ describe('MessageList', () => {
     expect(screen.getByText('first point')).toBeVisible()
     expect(screen.getByRole('link', { name: 'Safe link' })).toHaveAttribute('href', 'https://example.com')
     expect(screen.getByText('<strong>This is my literal message</strong>')).toBeVisible()
+  })
+
+  it('labels request-level tokens and a shared provider cost on both messages', () => {
+    const usage = {
+      inputTokens: 1284,
+      outputTokens: 96,
+      totalTokens: 1380,
+      cachedInputTokens: 1024,
+      cacheWriteInputTokens: 0,
+      reasoningTokens: 18,
+      costUsd: '0.002341',
+      costBasis: 'provider_reported' as const,
+      model: 'provider/model',
+      provider: 'provider',
+    }
+    render(<MessageList messages={[
+      { id: 'user-usage', author: 'user', body: 'Question', usage },
+      { id: 'assistant-usage', author: 'assistant', body: 'Answer', usage },
+    ]} />)
+
+    expect(screen.getByText('Request input: 1,284 tokens · 1,024 cached · Shared turn cost: $0.002341')).toBeVisible()
+    expect(screen.getByText('Response output: 96 tokens · 18 reasoning · Shared turn cost: $0.002341')).toBeVisible()
   })
 })

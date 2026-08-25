@@ -7,9 +7,9 @@ can be tested without a network or framework.
 
 ## Security posture
 
-- Message content is encrypted before it reaches either repository. The in-memory
-  repository and local key wrapper are development adapters; personal mode can
-  instead use conditional S3 writes and AWS KMS data keys.
+- Message content is encrypted before it reaches any repository. Default personal
+  mode uses local SQLite and a Windows DPAPI-protected master key; S3/KMS remains
+  an optional AWS adapter.
 - Each message gets a random AES-256-GCM data key. Authenticated context binds ciphertext to
   its conversation and message identifiers.
 - OpenRouter calls always request zero-data-retention, deny data collection, disable provider
@@ -22,8 +22,9 @@ can be tested without a network or framework.
 - Configuration fails at startup when the encryption key or selected provider credentials are
   absent. There is no plaintext fallback.
 
-The backend includes opt-in S3 persistence and an AWS KMS `DataKeyProvider` for
-personal mode. Authentication remains deployment work: bind this process only to
+The backend includes an encrypted local SQLite repository by default, plus opt-in
+S3 persistence and an AWS KMS `DataKeyProvider` for a future AWS deployment.
+Authentication remains deployment work: bind this process only to
 `127.0.0.1` and do not expose it to a network until authentication and
 authorisation are added at the API edge.
 
@@ -36,25 +37,18 @@ python -m pip install -e ".[dev]"
 Copy-Item .env.example .env
 ```
 
-Replace `CHAT_LOCAL_MASTER_KEY_B64` with the output of:
+Set `CHAT_OPENROUTER_API_KEY` in the ignored `.env` file, then run:
 
 ```powershell
-python -c "import base64,secrets; print(base64.b64encode(secrets.token_bytes(32)).decode())"
-```
-
-Start an OpenAI-compatible Ollama or vLLM endpoint, then run:
-
-```powershell
-uvicorn private_chat.main:app --reload
+..\scripts\start-local-chat.ps1
 ```
 
 The API documentation is at `http://127.0.0.1:8000/docs` in development only.
 
-For durable personal storage, set `CHAT_STORAGE_BACKEND=s3` together with the
-Terraform conversation bucket, KMS key and region outputs. The active local AWS
-identity must carry the output application data policy. Each message remains
-application-encrypted before S3 receives it; bucket SSE-KMS is an additional
-storage control.
+The default Windows key is protected by DPAPI for the current Windows account.
+There is deliberately no recovery export: reinstalling Windows or losing that
+account makes existing local chats unrecoverable. The `.env` API key is plaintext
+and ignored by Git; treat it as a spend-capable credential and rotate it if exposed.
 
 ## Model modes and API behaviour
 

@@ -1,9 +1,23 @@
-import type { ChatApi, ChatMessage, Conversation, ConversationSummary, ModelConfiguration, ModelOption, SendMessageRequest } from '../domain/chat'
+import type { ChatApi, ChatMessage, Conversation, ConversationSummary, CostBasis, ModelConfiguration, ModelOption, SendMessageRequest, TurnUsage } from '../domain/chat'
 
 interface ApiMessage {
   readonly id: string
   readonly role: 'assistant' | 'user'
   readonly content: string
+  readonly usage: ApiTurnUsage | null
+}
+
+interface ApiTurnUsage {
+  readonly input_tokens: number | null
+  readonly output_tokens: number | null
+  readonly total_tokens: number | null
+  readonly cached_input_tokens: number | null
+  readonly cache_write_input_tokens: number | null
+  readonly reasoning_tokens: number | null
+  readonly cost_usd: string | null
+  readonly cost_basis: CostBasis
+  readonly model: string
+  readonly provider: string
 }
 
 interface ApiConversation {
@@ -24,10 +38,34 @@ function parseMessage(value: unknown): ApiMessage {
   if (!isRecord(value)
     || typeof value.id !== 'string'
     || (value.role !== 'assistant' && value.role !== 'user')
-    || typeof value.content !== 'string') {
+    || typeof value.content !== 'string'
+    || !(value.usage === null || parseUsage(value.usage) !== null)) {
     throw new Error('The chat API returned an invalid message.')
   }
-  return { id: value.id, role: value.role, content: value.content }
+  return { id: value.id, role: value.role, content: value.content, usage: value.usage as ApiTurnUsage | null }
+}
+
+const isTokenCount = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isInteger(value) && value >= 0
+
+const isOptionalTokenCount = (value: unknown): value is number | null =>
+  value === null || isTokenCount(value)
+
+function parseUsage(value: unknown): ApiTurnUsage | null {
+  if (!isRecord(value)
+    || !isOptionalTokenCount(value.input_tokens)
+    || !isOptionalTokenCount(value.output_tokens)
+    || !isOptionalTokenCount(value.total_tokens)
+    || !isOptionalTokenCount(value.cached_input_tokens)
+    || !isOptionalTokenCount(value.cache_write_input_tokens)
+    || !isOptionalTokenCount(value.reasoning_tokens)
+    || !(value.cost_usd === null || (typeof value.cost_usd === 'string' && /^\d+(?:\.\d+)?$/.test(value.cost_usd)))
+    || (value.cost_basis !== 'provider_reported' && value.cost_basis !== 'self_hosted_unallocated' && value.cost_basis !== 'unavailable')
+    || typeof value.model !== 'string' || !value.model
+    || typeof value.provider !== 'string' || !value.provider) {
+    return null
+  }
+  return value as unknown as ApiTurnUsage
 }
 
 function parseConversation(value: unknown): ApiConversation {
@@ -51,6 +89,18 @@ const toDomain = (conversation: ApiConversation): Conversation => ({
     id: message.id,
     author: message.role,
     body: message.content,
+    usage: message.usage === null ? null : {
+      inputTokens: message.usage.input_tokens,
+      outputTokens: message.usage.output_tokens,
+      totalTokens: message.usage.total_tokens,
+      cachedInputTokens: message.usage.cached_input_tokens,
+      cacheWriteInputTokens: message.usage.cache_write_input_tokens,
+      reasoningTokens: message.usage.reasoning_tokens,
+      costUsd: message.usage.cost_usd,
+      costBasis: message.usage.cost_basis,
+      model: message.usage.model,
+      provider: message.usage.provider,
+    },
   })),
 })
 
@@ -99,6 +149,7 @@ export class HttpChatApi implements ChatApi {
     const value = await readJson(await fetch(`${this.baseUrl}/models`))
     if (!Array.isArray(value) || value.some((item) => !isRecord(item)
       || typeof item.id !== 'string' || typeof item.label !== 'string'
+      || !(typeof item.provider === 'string' || item.provider === null)
       || (item.backend !== 'self_hosted' && item.backend !== 'openrouter' && item.backend !== 'test'))) {
       throw new Error('The chat API returned an invalid model catalogue.')
     }
@@ -107,10 +158,16 @@ export class HttpChatApi implements ChatApi {
 
   async getModelConfiguration(): Promise<ModelConfiguration> {
     const value = await readJson(await fetch(`${this.baseUrl}/model-configuration`))
-    if (!isRecord(value) || typeof value.custom_openrouter_model_allowed !== 'boolean') {
+    if (!isRecord(value) || typeof value.custom_openrouter_model_allowed !== 'boolean'
+      || (value.model_backend !== 'self_hosted' && value.model_backend !== 'openrouter')
+      || typeof value.storage_label !== 'string') {
       throw new Error('The chat API returned invalid model configuration.')
     }
-    return { customOpenRouterModelAllowed: value.custom_openrouter_model_allowed }
+    return {
+      customOpenRouterModelAllowed: value.custom_openrouter_model_allowed,
+      modelBackend: value.model_backend,
+      storageLabel: value.storage_label,
+    }
   }
 
   async createConversation(): Promise<Conversation> {

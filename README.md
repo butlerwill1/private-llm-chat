@@ -1,6 +1,6 @@
 # Private Chat on AWS
 
-Private Chat is a working privacy-first personal chatbot with application-encrypted conversation storage and replaceable model backends. Its private-GPU path runs a pre-built Ollama model on a private AWS EC2 GPU instance, starts that instance only for a session, and reaches it through an encrypted SSM tunnel with no public IP or model port. It also supports a privacy-restricted OpenRouter-only session through the same local web interface.
+Private Chat is a loopback-only personal chatbot with application-encrypted conversation storage and replaceable model backends. Its normal mode stores encrypted transcripts in a local SQLite database and uses privacy-restricted OpenRouter inference. The AWS GPU path remains optional infrastructure that can be rebuilt with Terraform when needed.
 
 This repository implements the engineering foundation from the [project brief](Private-AWS-Chatbot-Project-Brief.docx). It is designed for personal, loopback-only use. It is not a public multi-user deployment: authentication and authorisation would be required before exposing the API beyond the computer running it.
 
@@ -27,9 +27,9 @@ This repository implements the engineering foundation from the [project brief](P
 | Mode | Where inference runs | What you pay for while using it | When to use it |
 |---|---|---|---|
 | Private GPU | Ollama on the private AWS GPU, reached through an SSM tunnel | GPU compute and temporary SSM interface endpoints | You want prompts and inference to stay in your AWS environment. |
-| OpenRouter-only | An approved OpenRouter provider over HTTPS | OpenRouter usage only; do not start the GPU or SSM endpoints | You want a lightweight hosted-model session. |
+| Local OpenRouter (default) | A pinned ZDR OpenRouter provider over HTTPS | OpenRouter usage only; no AWS resources | You want normal hosted-model use with encrypted local storage. |
 
-Both modes use the same React interface, FastAPI API and optional encrypted S3 conversation storage. The model selector in **Session settings** displays only the models enabled by the backend; an OpenRouter API key never reaches the browser.
+Both modes use the same React interface and FastAPI API. The model selector displays only backend-approved models; an OpenRouter API key never reaches the browser. OpenRouter is privacy-restricted hosted inference, not end-to-end private inference: the approved provider receives the prompt to generate its response.
 
 For a private GPU session, follow the [personal session runbook](ops/runbooks/personal-session.md). For OpenRouter-only mode, use the dedicated section in the same runbook.
 
@@ -39,8 +39,9 @@ For a private GPU session, follow the [personal session runbook](ops/runbooks/pe
 flowchart LR
     Browser["Browser on your computer"] -->|"/v1 loopback proxy"| Vite["React and Vite"]
     Vite --> API["FastAPI on 127.0.0.1:8000"]
-    API -->|"encrypted conversation objects"| Storage["S3 and KMS"]
-    API -->|"OpenRouter-only mode over TLS"| OpenRouter["Approved OpenRouter provider"]
+    API -->|"AES-256-GCM ciphertext"| Storage["Local SQLite database"]
+    Key["Windows DPAPI current-user key"] --> Storage
+    API -->|"ZDR request over TLS"| OpenRouter["Pinned OpenRouter provider"]
     API -->|"Private-GPU mode"| Tunnel["Local SSM tunnel on 127.0.0.1:11434"]
     Tunnel --> GPU["Private EC2 GPU with Ollama"]
 ```
@@ -89,10 +90,10 @@ python -m pip install -e ".[dev]"
 Copy-Item .env.example .env
 ```
 
-Generate a local development key and place it in `.env` as described in [the backend guide](backend/README.md). Then start the API:
+Copy the local configuration, set a real OpenRouter API key, then start the default launcher:
 
 ```powershell
-uvicorn private_chat.main:app --reload
+..\scripts\start-local-chat.ps1
 ```
 
 The development API listens on `http://127.0.0.1:8000`.
@@ -155,11 +156,11 @@ Continuous integration runs the corresponding checks for pull requests and chang
 
 ## Security model
 
-- The encrypted transcript is authoritative. Summaries and memories are derived, versioned data with provenance.
+- The encrypted local transcript is authoritative. Summaries and memories are derived, versioned data with provenance.
 - Plaintext is present briefly in application RAM and model memory during inference; application-level encryption cannot protect active processing.
 - Prompt and response bodies must never enter application, API Gateway, tracing or infrastructure logs.
 - The browser must never receive OpenRouter or AWS credentials.
-- OpenRouter policy is enforced inside its adapter so route handlers cannot accidentally omit it.
+- OpenRouter policy is enforced inside its adapter so route handlers cannot accidentally omit ZDR, provider pinning, data-collection denial or disabled fallbacks.
 - The optional GPU is private compute. It receives no public IP, and its model port accepts traffic only from the application security group.
 - Local encryption and repository adapters are development implementations. Production requires AWS KMS and durable encrypted storage adapters.
 
@@ -179,7 +180,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the working agreement.
 ## Current limitations
 
 - Personal mode relies on loopback-only FastAPI binding and local AWS identity; it is not a public authentication mechanism.
-- The S3/KMS adapters are unit-tested locally but still require integration testing in the target AWS account.
+- AWS Terraform and S3/KMS adapters are retained as optional infrastructure. Normal local operation does not contact AWS; an old local Terraform state must be refreshed before a future apply.
 - The GPU AMI factory and runtime session flow are implemented, but model choice and licence acceptance, trusted artefact checksums, GPU quotas and regional availability remain deployment-specific decisions.
 - Responses are not token-streamed. Long local generations display an in-progress state and have a bounded backend timeout.
 - GPU temperature, utilisation and VRAM usage are available through administrative commands such as `nvidia-smi`, not through the browser settings panel.

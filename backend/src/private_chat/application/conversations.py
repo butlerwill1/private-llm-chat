@@ -4,6 +4,7 @@ import asyncio
 from dataclasses import dataclass
 from uuid import UUID
 
+from private_chat.application.message_payload import decode_message_payload
 from private_chat.domain.models import ChatMessage, Conversation, StoredMessage
 from private_chat.ports.interfaces import ConversationRepository, EnvelopeEncryptor
 
@@ -42,16 +43,18 @@ class ConversationService:
             return None
         records = await self._repository.list_messages(conversation_id)
         async def decrypt(record: StoredMessage) -> ChatMessage:
-            content = await asyncio.to_thread(
+            plaintext = await asyncio.to_thread(
                 self._encryptor.decrypt,
                 record.encrypted_content,
                 context=message_context(conversation_id, record.id),
             )
+            payload = decode_message_payload(plaintext)
             return ChatMessage(
                 role=record.role,
-                content=content.decode(),
+                content=payload.content,
                 id=record.id,
                 created_at=record.created_at,
+                usage=payload.usage,
             )
 
         # KMS is a synchronous SDK boundary, so run each decrypt outside the

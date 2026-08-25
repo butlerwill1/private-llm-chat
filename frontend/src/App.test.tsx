@@ -81,7 +81,8 @@ describe('Private Chat', () => {
     await user.click(screen.getByText('Encrypted'))
     // toBeVisible is stronger than presence: it also checks that CSS/attributes do
     // not hide the explanation after the disclosure control has been activated.
-    expect(screen.getByText('Your conversation is private')).toBeVisible()
+    expect(screen.getByText('Encrypted local storage')).toBeVisible()
+    expect(screen.getByText(/privacy-restricted hosted inference/)).toBeVisible()
   })
 
   it('opens and closes the session settings panel', async () => {

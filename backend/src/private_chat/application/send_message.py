@@ -3,7 +3,8 @@ from dataclasses import dataclass
 from uuid import UUID
 
 from private_chat.application.conversations import message_context
-from private_chat.domain.models import ChatMessage, ModelRequest, Role, StoredMessage
+from private_chat.application.message_payload import decode_message_payload, encode_message_payload
+from private_chat.domain.models import ChatMessage, ModelRequest, Role, StoredMessage, TurnUsage
 from private_chat.ports.interfaces import ConversationRepository, EnvelopeEncryptor, ModelClient
 
 
@@ -37,10 +38,12 @@ class SendMessage:
         history = tuple(
             ChatMessage(
                 role=item.role,
-                content=self._encryptor.decrypt(
-                    item.encrypted_content,
-                    context=message_context(command.conversation_id, item.id),
-                ).decode(),
+                content=decode_message_payload(
+                    self._encryptor.decrypt(
+                        item.encrypted_content,
+                        context=message_context(command.conversation_id, item.id),
+                    )
+                ).content,
                 id=item.id,
                 created_at=item.created_at,
             )
@@ -49,7 +52,18 @@ class SendMessage:
         response = await self._model_client.generate(
             ModelRequest(messages=(*history, user), model=command.model_id or self._model_name)
         )
-        assistant = ChatMessage.create(Role.ASSISTANT, response.content)
+        usage = response.usage or TurnUsage.unavailable(
+            model=response.model, provider=response.provider
+        )
+        user = ChatMessage(user.role, user.content, user.id, user.created_at, usage)
+        assistant_message = ChatMessage.create(Role.ASSISTANT, response.content)
+        assistant = ChatMessage(
+            assistant_message.role,
+            assistant_message.content,
+            assistant_message.id,
+            assistant_message.created_at,
+            usage,
+        )
 
         async def stored(message: ChatMessage) -> StoredMessage:
             return StoredMessage(
@@ -58,7 +72,7 @@ class SendMessage:
                 role=message.role,
                 encrypted_content=await asyncio.to_thread(
                     self._encryptor.encrypt,
-                    message.content.encode(),
+                    encode_message_payload(message.content, message.usage),
                     context=message_context(command.conversation_id, message.id),
                 ),
                 created_at=message.created_at,

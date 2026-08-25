@@ -1,82 +1,85 @@
-"""Validated application configuration loaded from environment variables."""
+"""Validated application configuration loaded from ``CHAT_*`` environment variables."""
 
 import base64
 import binascii
+import os
 from enum import StrEnum
+from pathlib import Path
 
-from pydantic import Field, SecretStr, field_validator, model_validator
+from pydantic import BaseModel, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class ModelBackend(StrEnum):
-    """Inference implementations understood by the composition root."""
-
     OPENROUTER = "openrouter"
     SELF_HOSTED = "self_hosted"
 
 
 class StorageBackend(StrEnum):
-    """Persistence implementations selected at the composition root."""
-
+    LOCAL = "local"
     MEMORY = "memory"
     S3 = "s3"
 
 
+class LocalKeyMode(StrEnum):
+    DPAPI = "dpapi"
+    ENVIRONMENT = "environment"
+
+
+class OpenRouterRoute(BaseModel):
+    """One immutable model/provider boundary for a privacy-restricted request."""
+
+    model_config = {"frozen": True, "extra": "forbid"}
+    model_id: str = Field(min_length=1)
+    provider: str = Field(min_length=1)
+    label: str = Field(min_length=1)
+
+
+DEFAULT_OPENROUTER_ROUTES: tuple[OpenRouterRoute, ...] = (
+    OpenRouterRoute(
+        model_id="meta-llama/llama-3.3-70b-instruct", provider="deepinfra", label="Llama 3.3 70B"
+    ),
+    OpenRouterRoute(model_id="qwen/qwen3-32b", provider="deepinfra", label="Qwen3 32B"),
+    OpenRouterRoute(model_id="google/gemma-3-27b-it", provider="deepinfra", label="Gemma 3 27B"),
+    OpenRouterRoute(
+        model_id="mistralai/mistral-small-3.2-24b-instruct",
+        provider="deepinfra",
+        label="Mistral Small 3.2 24B",
+    ),
+    OpenRouterRoute(model_id="deepseek/deepseek-r1", provider="novita", label="DeepSeek R1"),
+)
+
+
 class Settings(BaseSettings):
-    """Typed settings populated from ``CHAT_*`` environment variables.
+    """Configuration that fails closed instead of selecting a plaintext fallback."""
 
-    Pydantic Settings validates configuration once during application startup. Secrets
-    use ``SecretStr`` so ordinary representations do not accidentally reveal them.
-    """
-
-    # Unknown environment values are ignored because a process may contain unrelated
-    # variables, while the CHAT_ prefix prevents collisions with generic setting names.
     model_config = SettingsConfigDict(env_prefix="CHAT_", env_file=".env", extra="ignore")
+
     environment: str = "development"
-    model_backend: ModelBackend = ModelBackend.SELF_HOSTED
-    model_name: str = "private-chat"
-    storage_backend: StorageBackend = StorageBackend.MEMORY
+    model_backend: ModelBackend = ModelBackend.OPENROUTER
+    model_name: str = DEFAULT_OPENROUTER_ROUTES[0].model_id
+    storage_backend: StorageBackend = StorageBackend.LOCAL
+    local_data_dir: Path | None = None
+    local_key_mode: LocalKeyMode = LocalKeyMode.DPAPI
     local_master_key_b64: SecretStr | None = None
     conversation_bucket: str | None = None
     kms_key_id: str | None = None
     aws_region: str = "eu-west-2"
     self_hosted_base_url: str = "http://127.0.0.1:11434/v1"
     self_hosted_api_key: SecretStr | None = None
-    # Local models can take longer than a hosted API, especially for the first
-    # request after startup. Keep the limit finite so a broken tunnel does not
-    # leave a browser request open forever, but generous enough for GPU inference.
     model_response_timeout_seconds: int = Field(default=300, ge=1, le=900)
     openrouter_api_key: SecretStr | None = None
-    enable_openrouter: bool = False
-    # A comma-separated CHAT_OPENROUTER_MODELS value is deliberately an
-    # allowlist. The browser never supplies arbitrary upstream model IDs.
-    openrouter_models: tuple[str, ...] = (
-        "meta-llama/llama-3.3-70b-instruct",
-        "qwen/qwen3-32b",
-        "deepseek/deepseek-r1",
-        "mistralai/mistral-small-3.1-24b-instruct",
-        "google/gemma-3-27b-it",
-    )
+    enable_openrouter: bool = True
+    openrouter_routes: tuple[OpenRouterRoute, ...] = DEFAULT_OPENROUTER_ROUTES
+    openrouter_zdr_preflight: bool = True
+    openrouter_max_output_tokens: int = Field(default=4096, ge=1, le=4096)
     allow_custom_openrouter_model: bool = False
-    openrouter_allowed_providers: tuple[str, ...] = ()
-
-    @field_validator("openrouter_models", "openrouter_allowed_providers", mode="before")
-    @classmethod
-    def split_model_lists(cls, value: object) -> tuple[str, ...] | object:
-        """Accept ergonomic comma-separated environment settings as immutable tuples."""
-
-        if isinstance(value, str):
-            return tuple(item.strip() for item in value.split(",") if item.strip())
-        return value
 
     @field_validator("local_master_key_b64")
     @classmethod
     def validate_master_key(cls, value: SecretStr | None) -> SecretStr | None:
-        """Fail during startup unless the local development key is exactly 256 bits."""
-
         if value is None:
             return None
-
         try:
             decoded = base64.b64decode(value.get_secret_value(), validate=True)
         except (binascii.Error, ValueError) as exc:
@@ -85,29 +88,56 @@ class Settings(BaseSettings):
             raise ValueError("Decoded master key must contain exactly 32 bytes")
         return value
 
-    @model_validator(mode="after")
-    def validate_storage_configuration(self) -> "Settings":
-        """Require exactly the credentials needed by the selected storage adapter."""
+    @field_validator("openrouter_routes")
+    @classmethod
+    def require_unique_routes(
+        cls, value: tuple[OpenRouterRoute, ...]
+    ) -> tuple[OpenRouterRoute, ...]:
+        if not value:
+            raise ValueError("At least one OpenRouter route is required")
+        if len({route.model_id for route in value}) != len(value):
+            raise ValueError("OpenRouter route model IDs must be unique")
+        return value
 
+    @model_validator(mode="after")
+    def validate_configuration(self) -> "Settings":
         if self.storage_backend is StorageBackend.MEMORY and self.local_master_key_b64 is None:
             raise ValueError("CHAT_LOCAL_MASTER_KEY_B64 is required for memory storage")
-        if self.storage_backend is StorageBackend.S3:
-            if self.conversation_bucket is None or self.kms_key_id is None:
+        if self.storage_backend is StorageBackend.LOCAL:
+            if self.local_key_mode is LocalKeyMode.DPAPI and os.name != "nt":
+                raise ValueError("CHAT_LOCAL_KEY_MODE=dpapi requires Windows")
+            if (
+                self.local_key_mode is LocalKeyMode.ENVIRONMENT
+                and self.local_master_key_b64 is None
+            ):
                 raise ValueError(
-                    "CHAT_CONVERSATION_BUCKET and CHAT_KMS_KEY_ID are required for S3 storage"
+                    "CHAT_LOCAL_MASTER_KEY_B64 is required for environment local storage"
                 )
+        if self.storage_backend is StorageBackend.S3 and (
+            self.conversation_bucket is None or self.kms_key_id is None
+        ):
+            raise ValueError(
+                "CHAT_CONVERSATION_BUCKET and CHAT_KMS_KEY_ID are required for S3 storage"
+            )
         if self.enable_openrouter or self.model_backend is ModelBackend.OPENROUTER:
             if self.openrouter_api_key is None:
-                raise ValueError("CHAT_OPENROUTER_API_KEY is required for CHAT_OPENROUTER_MODELS")
-            if not self.openrouter_allowed_providers:
-                raise ValueError(
-                    "CHAT_OPENROUTER_ALLOWED_PROVIDERS is required for CHAT_OPENROUTER_MODELS"
-                )
+                raise ValueError("CHAT_OPENROUTER_API_KEY is required for OpenRouter mode")
+            key = self.openrouter_api_key.get_secret_value().strip()
+            if not key or key.startswith("REPLACE_"):
+                raise ValueError("CHAT_OPENROUTER_API_KEY must contain a real OpenRouter API key")
         return self
 
     def local_master_key(self) -> bytes:
-        """Decode the already-validated local key at the composition boundary."""
-
         if self.local_master_key_b64 is None:
             raise RuntimeError("Local master key is unavailable for the selected storage backend")
         return base64.b64decode(self.local_master_key_b64.get_secret_value(), validate=True)
+
+    def resolved_local_data_dir(self) -> Path:
+        if self.local_data_dir is not None:
+            return self.local_data_dir
+        local_app_data = os.environ.get("LOCALAPPDATA")
+        if not local_app_data:
+            raise RuntimeError(
+                "LOCALAPPDATA is required for the default local transcript directory"
+            )
+        return Path(local_app_data) / "PrivateLLMChat"

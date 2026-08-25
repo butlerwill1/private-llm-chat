@@ -5,6 +5,7 @@ offline, deterministic and free from API usage charges.
 """
 
 from datetime import UTC, datetime
+from decimal import Decimal
 from uuid import uuid4
 
 import httpx
@@ -83,7 +84,128 @@ async def test_openrouter_contract_and_privacy_payload() -> None:
         "data_collection": "deny",
         "zdr": True,
     }
+    assert payload["max_tokens"] == 4096
     assert result.content == "answer"
+    assert result.usage is None
+
+
+@pytest.mark.asyncio
+async def test_openrouter_records_exact_usage_and_cost() -> None:
+    async def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "model": "test-model",
+                "provider": "trusted-provider",
+                "choices": [{"message": {"content": "answer"}}],
+                "usage": {
+                    "prompt_tokens": 1284,
+                    "completion_tokens": 96,
+                    "total_tokens": 1380,
+                    "cost": 0.002341,
+                    "prompt_tokens_details": {"cached_tokens": 1024, "cache_write_tokens": 0},
+                    "completion_tokens_details": {"reasoning_tokens": 18},
+                },
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+        client = OpenRouterModelClient(
+            OpenRouterConfiguration(api_key="secret", allowed_providers=("trusted-provider",)), http
+        )
+        result = await client.generate(request())
+
+    assert result.usage is not None
+    assert result.usage.input_tokens == 1284
+    assert result.usage.cached_input_tokens == 1024
+    assert result.usage.reasoning_tokens == 18
+    assert result.usage.cost_usd == Decimal("0.002341")
+
+
+@pytest.mark.asyncio
+async def test_openrouter_uses_generation_usage_fallback() -> None:
+    async def handler(incoming: httpx.Request) -> httpx.Response:
+        if incoming.url.path.endswith("/generation"):
+            return httpx.Response(
+                200,
+                json={
+                    "data": {
+                        "tokens_prompt": 9,
+                        "tokens_completion": 3,
+                        "native_tokens_cached": 4,
+                        "native_tokens_reasoning": 1,
+                        "total_cost": 0.000007,
+                    }
+                },
+            )
+        return httpx.Response(
+            200,
+            headers={"x-generation-id": "gen-123"},
+            json={
+                "model": "test-model",
+                "provider": "trusted-provider",
+                "choices": [{"message": {"content": "answer"}}],
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+        client = OpenRouterModelClient(
+            OpenRouterConfiguration(api_key="secret", allowed_providers=("trusted-provider",)), http
+        )
+        result = await client.generate(request())
+
+    assert result.usage is not None
+    assert result.usage.input_tokens == 9
+    assert result.usage.output_tokens == 3
+    assert result.usage.cached_input_tokens == 4
+    assert result.usage.cost_usd == Decimal("0.000007")
+
+
+@pytest.mark.asyncio
+async def test_openrouter_keeps_a_zero_cost_and_marks_malformed_usage_unavailable() -> None:
+    responses = iter((
+        {
+            "model": "test-model",
+            "provider": "trusted-provider",
+            "choices": [{"message": {"content": "free answer"}}],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2, "cost": 0},
+        },
+        {
+            "model": "test-model",
+            "provider": "trusted-provider",
+            "choices": [{"message": {"content": "unknown answer"}}],
+            "usage": {"prompt_tokens": "not-a-number"},
+        },
+    ))
+
+    async def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=next(responses))
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+        client = OpenRouterModelClient(
+            OpenRouterConfiguration(api_key="secret", allowed_providers=("trusted-provider",)), http
+        )
+        zero_cost = await client.generate(request())
+        malformed = await client.generate(request())
+
+    assert zero_cost.usage is not None
+    assert zero_cost.usage.cost_usd == Decimal("0")
+    assert malformed.usage is None
+
+
+@pytest.mark.asyncio
+async def test_openrouter_zdr_preflight_rejects_missing_provider_route() -> None:
+    """A drifted public ZDR catalogue must stop the local hosted mode before use."""
+
+    async def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"data": [{"model_id": "test-model", "tag": "other/fp8"}]})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+        client = OpenRouterModelClient(
+            OpenRouterConfiguration(api_key="secret", allowed_providers=("approved",)), http
+        )
+        with pytest.raises(RuntimeError, match="verified ZDR route"):
+            await client.verify_zdr_route("test-model")
 
 
 @pytest.mark.asyncio
@@ -163,3 +285,25 @@ async def test_self_hosted_model_client_contract() -> None:
     # Downstream business logic does not need to know the vendor response shape.
     assert result.content == "local"
     assert result.provider == "self-hosted"
+    assert result.usage is None
+
+
+@pytest.mark.asyncio
+async def test_self_hosted_usage_has_no_allocated_monetary_cost() -> None:
+    async def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "model": "local-model",
+                "choices": [{"message": {"content": "local"}}],
+                "usage": {"prompt_tokens": 10, "completion_tokens": 2, "total_tokens": 12},
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+        result = await SelfHostedModelClient(SelfHostedConfiguration(), http).generate(request())
+
+    assert result.usage is not None
+    assert result.usage.input_tokens == 10
+    assert result.usage.cost_usd is None
+    assert result.usage.cost_basis.value == "self_hosted_unallocated"

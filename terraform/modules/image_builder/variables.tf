@@ -155,6 +155,36 @@ variable "model_name" {
   }
 }
 
+variable "ollama_model_reference" {
+  description = "Optional official Ollama registry model reference. Mutually exclusive with the S3 GGUF source."
+  type        = string
+  default     = null
+  nullable    = true
+
+  validation {
+    condition = (
+      var.ollama_model_reference == null ||
+      can(regex("^[a-z0-9][a-z0-9._/-]*:[A-Za-z0-9._-]+$", var.ollama_model_reference))
+    )
+    error_message = "ollama_model_reference must be a registry model reference such as qwen3.5:9b."
+  }
+}
+
+variable "ollama_model_manifest_digest" {
+  description = "Expected manifest digest for the optional Ollama registry model."
+  type        = string
+  default     = null
+  nullable    = true
+
+  validation {
+    condition = (
+      var.ollama_model_manifest_digest == null ||
+      can(regex("^[0-9a-fA-F]{64}$", var.ollama_model_manifest_digest))
+    )
+    error_message = "ollama_model_manifest_digest must be null or a 64-character hexadecimal digest."
+  }
+}
+
 variable "build_image_now" {
   description = "Trigger a tested image build during terraform apply. Usually false; run the pipeline explicitly in CI."
   type        = bool

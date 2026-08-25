@@ -29,10 +29,30 @@ locals {
 check "model_artifact_configuration" {
   assert {
     condition = (
-      (var.image_builder_model_s3_key == null && var.image_builder_model_sha256 == null && var.image_builder_model_name == null) ||
-      (local.selected_model_artifact_bucket_name != null && var.image_builder_model_s3_key != null && var.image_builder_model_sha256 != null && var.image_builder_model_name != null)
+      (
+        var.image_builder_model_s3_key == null &&
+        var.image_builder_model_sha256 == null &&
+        var.image_builder_ollama_model_reference == null &&
+        var.image_builder_ollama_model_manifest_digest == null &&
+        var.image_builder_model_name == null
+      ) ||
+      (
+        local.selected_model_artifact_bucket_name != null &&
+        var.image_builder_model_s3_key != null &&
+        var.image_builder_model_sha256 != null &&
+        var.image_builder_model_name != null &&
+        var.image_builder_ollama_model_reference == null &&
+        var.image_builder_ollama_model_manifest_digest == null
+      ) ||
+      (
+        var.image_builder_model_s3_key == null &&
+        var.image_builder_model_sha256 == null &&
+        var.image_builder_model_name != null &&
+        var.image_builder_ollama_model_reference != null &&
+        var.image_builder_ollama_model_manifest_digest != null
+      )
     )
-    error_message = "Set the model key, SHA-256, and model name together, and either enable the managed model bucket or supply an existing bucket."
+    error_message = "Choose exactly one model source: a verified S3 GGUF or a digest-pinned Ollama registry model. Set its complete source fields and model name together."
   }
 }
 
@@ -88,24 +108,26 @@ module "image_builder" {
   count  = var.enable_image_builder ? 1 : 0
   source = "./modules/image_builder"
 
-  name                    = local.name
-  aws_region              = var.aws_region
-  account_id              = data.aws_caller_identity.current.account_id
-  parent_image            = coalesce(var.image_builder_parent_image, "ami-00000000000000000")
-  ollama_version          = coalesce(var.ollama_version, "0.0.0")
-  ollama_sha256           = coalesce(var.ollama_sha256, "0000000000000000000000000000000000000000000000000000000000000000")
-  component_version       = var.image_builder_component_version
-  recipe_version          = var.image_builder_recipe_version
-  build_instance_types    = var.image_builder_instance_types
-  build_availability_zone = var.image_builder_availability_zone
-  root_volume_gib         = var.gpu_root_volume_gib
-  kms_key_arn             = module.data.kms_key_arn
-  model_s3_bucket         = var.image_builder_model_s3_key == null ? null : local.selected_model_artifact_bucket_name
-  model_s3_key            = var.image_builder_model_s3_key
-  model_sha256            = var.image_builder_model_sha256
-  model_name              = var.image_builder_model_name
-  build_image_now         = var.build_image_now
-  tags                    = local.common_tags
+  name                         = local.name
+  aws_region                   = var.aws_region
+  account_id                   = data.aws_caller_identity.current.account_id
+  parent_image                 = coalesce(var.image_builder_parent_image, "ami-00000000000000000")
+  ollama_version               = coalesce(var.ollama_version, "0.0.0")
+  ollama_sha256                = coalesce(var.ollama_sha256, "0000000000000000000000000000000000000000000000000000000000000000")
+  component_version            = var.image_builder_component_version
+  recipe_version               = var.image_builder_recipe_version
+  build_instance_types         = var.image_builder_instance_types
+  build_availability_zone      = var.image_builder_availability_zone
+  root_volume_gib              = var.gpu_root_volume_gib
+  kms_key_arn                  = module.data.kms_key_arn
+  model_s3_bucket              = var.image_builder_model_s3_key == null ? null : local.selected_model_artifact_bucket_name
+  model_s3_key                 = var.image_builder_model_s3_key
+  model_sha256                 = var.image_builder_model_sha256
+  model_name                   = var.image_builder_model_name
+  ollama_model_reference       = var.image_builder_ollama_model_reference
+  ollama_model_manifest_digest = var.image_builder_ollama_model_manifest_digest
+  build_image_now              = var.build_image_now
+  tags                         = local.common_tags
 }
 
 module "gpu" {

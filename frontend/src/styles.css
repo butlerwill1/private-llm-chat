@@ -62,6 +62,7 @@ button:focus-visible, textarea:focus-visible, select:focus-visible, summary:focu
 .message-content { padding-top: 8px; font-size: 21px; line-height: 1.65; }
 .message-content strong { display: block; margin-bottom: 10px; font-size: 21px; font-weight: 600; line-height: 1.2; }
 .message-content p { margin: 0; }
+.message-content .message-usage { margin-top: 14px; color: var(--muted); font-family: "Cascadia Code", Consolas, monospace; font-size: 12px; line-height: 1.45; }
 .message-content > :not(strong) { margin: 0 0 16px; }
 .message-content > :last-child { margin-bottom: 0; }
 .message-content h1, .message-content h2, .message-content h3 { margin-top: 0; font-family: Georgia, "Times New Roman", serif; line-height: 1.2; }

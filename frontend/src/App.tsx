@@ -122,7 +122,7 @@ export function App({ api, initialConversations, initialSummaries, models, model
           onDelete={() => void deleteConversation()}
         />
         {selectedConversation ? <MessageList messages={selectedConversation.messages} /> : <p className="conversation-loading">Loading encrypted conversation…</p>}
-        {isSending ? <p className="response-pending" role="status">The local model is generating a response…</p> : null}
+        {isSending ? <p className="response-pending" role="status">The selected model is generating a response…</p> : null}
         {error ? <p className="request-error" role="alert">{error}</p> : null}
         <Composer disabled={isSending} selectedModelId={selectedModelId} onSend={sendMessage} />
       </main>
@@ -130,7 +130,7 @@ export function App({ api, initialConversations, initialSummaries, models, model
         <div className="settings-backdrop" role="presentation" onClick={() => setSettingsOpen(false)}>
           <section className="settings-panel" role="dialog" aria-modal="true" aria-labelledby="settings-title" onClick={(event) => event.stopPropagation()}>
             <div className="settings-heading"><h2 id="settings-title">Session settings</h2><button type="button" onClick={() => setSettingsOpen(false)}>Close</button></div>
-            <dl><dt>Selected model</dt><dd>{models.find((item) => item.id === selectedModelId)?.label ?? selectedModelId}</dd><dt>Transcript storage</dt><dd>Envelope encrypted, stored in S3</dd><dt>Response display</dt><dd>Shown once generation completes</dd></dl>
+            <dl><dt>Selected model</dt><dd>{models.find((item) => item.id === selectedModelId)?.label ?? selectedModelId}</dd><dt>Provider</dt><dd>{models.find((item) => item.id === selectedModelId)?.provider ?? 'Local or test adapter'}</dd><dt>Transcript storage</dt><dd>{modelConfiguration.storageLabel}</dd><dt>Inference mode</dt><dd>{modelConfiguration.modelBackend === 'openrouter' ? 'Privacy-restricted hosted inference' : 'Self-hosted inference'}</dd><dt>Response display</dt><dd>Shown once generation completes</dd></dl>
             <label className="settings-model-label" htmlFor="settings-model">Model</label>
             <select id="settings-model" value={models.some((item) => item.id === selectedModelId) ? selectedModelId : ''} onChange={(event) => setSelectedModelId(event.target.value)}>
               {models.map((model) => <option key={model.id} value={model.id}>{model.label}</option>)}

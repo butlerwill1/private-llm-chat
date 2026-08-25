@@ -6,12 +6,14 @@ real server without opening a network port or contacting an inference provider.
 """
 
 import base64
+import os
+from pathlib import Path
 
 import httpx
 import pytest
 
 from private_chat.bootstrap import create_app
-from private_chat.config import Settings
+from private_chat.config import LocalKeyMode, ModelBackend, Settings, StorageBackend
 from private_chat.domain.models import ModelRequest, ModelResponse
 
 
@@ -37,6 +39,17 @@ class TimingOutModel:
         raise httpx.ReadTimeout("model response exceeded the configured timeout")
 
 
+def make_settings() -> Settings:
+    """Use disposable in-memory storage because these API tests inject a model stub."""
+
+    return Settings(
+        model_backend=ModelBackend.SELF_HOSTED,
+        enable_openrouter=False,
+        storage_backend=StorageBackend.MEMORY,
+        local_master_key_b64=base64.b64encode(b"x" * 32).decode(),
+    )
+
+
 @pytest.mark.asyncio
 async def test_api_validates_and_returns_a_turn() -> None:
     """A valid message should produce a complete user-and-assistant transcript.
@@ -47,9 +60,7 @@ async def test_api_validates_and_returns_a_turn() -> None:
 
     # Arrange: Settings normally reads CHAT_* environment variables. Supplying a
     # base64-encoded 32-byte key directly makes this test self-contained.
-    settings = Settings(
-        local_master_key_b64=base64.b64encode(b"x" * 32).decode(),
-    )
+    settings = make_settings()
     # Build the real FastAPI application, replacing only its model dependency.
     app = create_app(settings, model_client=StubModel())
     # ASGITransport sends HTTPX requests straight into FastAPI in memory. No web
@@ -76,6 +87,19 @@ async def test_api_validates_and_returns_a_turn() -> None:
         "hello",
     ]
     assert response.json()["messages"][-1]["role"] == "assistant"
+    usage = response.json()["messages"][-1]["usage"]
+    assert usage == {
+        "input_tokens": None,
+        "output_tokens": None,
+        "total_tokens": None,
+        "cached_input_tokens": None,
+        "cache_write_input_tokens": None,
+        "reasoning_tokens": None,
+        "cost_usd": None,
+        "cost_basis": "unavailable",
+        "model": "meta-llama/llama-3.3-70b-instruct",
+        "provider": "stub",
+    }
 
 
 @pytest.mark.asyncio
@@ -87,7 +111,7 @@ async def test_api_forbids_unexpected_fields() -> None:
     """
 
     # Arrange the same real application and in-memory HTTP client used above.
-    settings = Settings(local_master_key_b64=base64.b64encode(b"x" * 32).decode())
+    settings = make_settings()
     app = create_app(settings, model_client=StubModel())
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
@@ -103,6 +127,21 @@ async def test_api_forbids_unexpected_fields() -> None:
 
 
 @pytest.mark.asyncio
+async def test_model_configuration_exposes_no_local_paths_or_secrets() -> None:
+    app = create_app(make_settings(), model_client=StubModel())
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.get("/v1/model-configuration")
+        models = await client.get("/v1/models")
+    assert response.json() == {
+        "custom_openrouter_model_allowed": False,
+        "model_backend": "self_hosted",
+        "storage_label": "Encrypted in-memory session",
+    }
+    assert models.json()[0]["provider"] is None
+
+
+@pytest.mark.asyncio
 async def test_api_reports_model_timeout_as_gateway_timeout() -> None:
     """A slow local model should produce a retryable 504 rather than a 500.
 
@@ -111,7 +150,7 @@ async def test_api_reports_model_timeout_as_gateway_timeout() -> None:
     browser receives a meaningful status code for this operational failure.
     """
 
-    settings = Settings(local_master_key_b64=base64.b64encode(b"x" * 32).decode())
+    settings = make_settings()
     app = create_app(settings, model_client=TimingOutModel())
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
@@ -137,7 +176,7 @@ async def test_conversation_lifecycle() -> None:
 
     # Arrange a fresh application. Its in-memory repository starts empty and is
     # isolated from the application created by every other test.
-    settings = Settings(local_master_key_b64=base64.b64encode(b"x" * 32).decode())
+    settings = make_settings()
     app = create_app(settings, model_client=StubModel())
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
@@ -158,3 +197,31 @@ async def test_conversation_lifecycle() -> None:
     assert listed.json()[0]["id"] == conversation_id
     assert deleted.status_code == 204
     assert missing.status_code == 404
+
+
+@pytest.mark.skipif(os.name != "nt", reason="The normal local key mode uses Windows DPAPI")
+@pytest.mark.asyncio
+async def test_default_local_storage_survives_application_restart(tmp_path: Path) -> None:
+    settings = Settings(
+        model_backend=ModelBackend.SELF_HOSTED,
+        enable_openrouter=False,
+        storage_backend=StorageBackend.LOCAL,
+        local_key_mode=LocalKeyMode.DPAPI,
+        local_data_dir=tmp_path,
+    )
+    first = create_app(settings, model_client=StubModel())
+    transport = httpx.ASGITransport(app=first)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        created = await client.post("/v1/conversations")
+        conversation_id = created.json()["id"]
+        await client.post(
+            f"/v1/conversations/{conversation_id}/messages", json={"content": "persist me"}
+        )
+
+    restarted = create_app(settings, model_client=StubModel())
+    transport = httpx.ASGITransport(app=restarted)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        loaded = await client.get(f"/v1/conversations/{conversation_id}")
+    assert [message["content"] for message in loaded.json()["messages"]] == ["persist me", "hello"]
+    assert (tmp_path / "master-key.dpapi").exists()
+    assert b"persist me" not in (tmp_path / "conversations.sqlite3").read_bytes()

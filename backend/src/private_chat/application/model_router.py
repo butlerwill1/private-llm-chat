@@ -14,6 +14,7 @@ class ModelOption:
     id: str
     label: str
     backend: str
+    provider: str | None = None
 
 
 class ModelRouter:

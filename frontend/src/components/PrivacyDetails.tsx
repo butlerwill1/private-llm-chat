@@ -9,8 +9,8 @@ export function PrivacyDetails() {
         <ChevronIcon className="privacy-chevron" />
       </summary>
       <div className="privacy-panel">
-        <strong>Your conversation is private</strong>
-        <p>Messages are encrypted before they are stored. The private model is not exposed directly to the internet.</p>
+        <strong>Encrypted local storage</strong>
+        <p>Messages are encrypted before local storage. The selected OpenRouter provider receives the prompt to generate a response; this is privacy-restricted hosted inference, not end-to-end private inference.</p>
       </div>
     </details>
   )

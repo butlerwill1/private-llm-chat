@@ -39,8 +39,10 @@ resource type that supports tagging, including resources created by child module
 can add reporting dimensions such as `Workload`, but it cannot override the
 protected keys. The optional GPU instance carries an `AutoStop` tag describing
 its instance-side systemd watchdog. By default it shuts itself down two hours
-after every boot, even if the controlling laptop or terminal has disappeared. Its
-root EBS volume receives the standard tags explicitly.
+after every boot, even if the controlling laptop or terminal has disappeared.
+The watchdog explicitly resets its timer after each restart, so stopping and
+later starting the same instance always begins a fresh allowance. Its root EBS
+volume receives the standard tags explicitly.
 
 After the first tagged resources are created, activate the user-defined tag keys
 in AWS Billing and Cost Management under **Cost allocation tags**. Until they are
@@ -116,8 +118,12 @@ The AWSTOE build component verifies NVIDIA, verifies the `.tar.zst` before
 extraction, sets `OLLAMA_NO_CLOUD=1`, installs a hardened systemd service, and can
 download one exact GGUF object from S3, verify it, and import it. The test-stage
 component launches the baked image and verifies NVIDIA and Ollama. When a model
-is staged, it also performs a real generation and requires Ollama to report GPU
-use. A model-less build deliberately skips only the inference test.
+is staged, it performs text generation followed by first and repeated warm
+vision generations, requires `/api/ps` to list that model, and samples
+`nvidia-smi` to prove non-zero GPU utilisation. Failed or timed-out readiness
+tests retain service, journal, GPU, process and memory diagnostics on the test
+instance and print them into Image Builder logs. A model-less build deliberately
+skips only the inference test.
 
 Start the output pipeline ARN from approved CI or operations tooling. Setting
 `build_image_now = true` instead starts chargeable GPU build/test instances during

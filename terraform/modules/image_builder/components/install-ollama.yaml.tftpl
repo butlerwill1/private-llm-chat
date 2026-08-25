@@ -96,6 +96,13 @@ phases:
               exit 1
               SCRIPT
               chmod 0755 /usr/local/libexec/private-llm-chat/wait-for-cuda
+              # Install the same end-to-end readiness probe used by Image
+              # Builder so a running GPU can be diagnosed through SSM without
+              # maintaining a second, divergent test script.
+              printf '%s' '${readiness_script_base64}' \
+                | base64 --decode \
+                >/usr/local/libexec/private-llm-chat/verify-ollama-readiness
+              chmod 0755 /usr/local/libexec/private-llm-chat/verify-ollama-readiness
 
               tee /etc/systemd/system/ollama.service >/dev/null <<'UNIT'
               [Unit]
@@ -119,6 +126,22 @@ phases:
               # GPU discovery can time out on an otherwise healthy NVIDIA T4.
               # This is Ollama's documented fallback when autodetection fails.
               Environment=OLLAMA_LLM_LIBRARY=cuda_v12
+              # This deployment serves exactly one model and one inference
+              # request at a time. Explicit limits prevent a backlog or an
+              # accidental second runner from consuming host/GPU memory.
+              Environment=OLLAMA_MAX_LOADED_MODELS=1
+              Environment=OLLAMA_NUM_PARALLEL=1
+              Environment=OLLAMA_MAX_QUEUE=8
+              # PDF page images can exceed the former 4K default after vision
+              # tokenisation. The L4 has ample VRAM for an 8K context.
+              Environment=OLLAMA_CONTEXT_LENGTH=8192
+              # Keep the runner warm between a short sequence of PDF requests.
+              Environment=OLLAMA_KEEP_ALIVE=30m
+              # llama-server otherwise reserves an 8 GiB persistent prompt
+              # cache. Unique PDF pages gain little from it, while the g6.xlarge
+              # host has only 15 GiB RAM and no swap. A bounded cache prevents
+              # scheduler pressure and slow runner recycling.
+              Environment=LLAMA_ARG_CACHE_RAM=512
               # Loading a model for the first time can be slower on a newly
               # created AMI. Match this server-side limit to the bounded test.
               Environment=OLLAMA_LOAD_TIMEOUT=30m
@@ -161,16 +184,35 @@ phases:
                 echo 'No model artefact configured; model and GPU inference tests will be skipped.'
                 exit 0
               fi
-              install --directory --owner ollama --group ollama --mode 0750 /var/lib/ollama/import
-              aws s3 cp '${model_s3_uri}' /var/lib/ollama/import/model.gguf --only-show-errors
-              echo '${model_sha256}  /var/lib/ollama/import/model.gguf' | sha256sum --check --strict
-              chown ollama:ollama /var/lib/ollama/import/model.gguf
-              printf 'FROM /var/lib/ollama/import/model.gguf\n' >/var/lib/ollama/import/Modelfile
-              chown ollama:ollama /var/lib/ollama/import/Modelfile
-              sudo --user ollama HOME=/var/lib/ollama /usr/bin/ollama create \
-                '${model_name}' --file /var/lib/ollama/import/Modelfile
-              rm --force /var/lib/ollama/import/model.gguf /var/lib/ollama/import/Modelfile
-              rmdir /var/lib/ollama/import
+              if [ '${model_source}' = 's3_gguf' ]; then
+                install --directory --owner ollama --group ollama --mode 0750 /var/lib/ollama/import
+                aws s3 cp '${model_s3_uri}' /var/lib/ollama/import/model.gguf --only-show-errors
+                echo '${model_sha256}  /var/lib/ollama/import/model.gguf' | sha256sum --check --strict
+                chown ollama:ollama /var/lib/ollama/import/model.gguf
+                printf 'FROM /var/lib/ollama/import/model.gguf\n' >/var/lib/ollama/import/Modelfile
+                chown ollama:ollama /var/lib/ollama/import/Modelfile
+                sudo --user ollama HOME=/var/lib/ollama /usr/bin/ollama create \
+                  '${model_name}' --file /var/lib/ollama/import/Modelfile
+                rm --force /var/lib/ollama/import/model.gguf /var/lib/ollama/import/Modelfile
+                rmdir /var/lib/ollama/import
+              elif [ '${model_source}' = 'ollama_registry' ]; then
+                # The registry manifest includes the model and vision-projector
+                # layers together. Verify its immutable digest before allowing
+                # Ollama to pull the package; importing only a Qwen 3.5 GGUF
+                # would otherwise lose its image capability.
+                registry_repository=$(printf '%s' '${registry_model_reference}' | cut -d: -f1)
+                registry_tag=$(printf '%s' '${registry_model_reference}' | cut -d: -f2)
+                observed_digest=$(curl --fail --silent --show-error --head \
+                  "https://registry.ollama.ai/v2/library/$registry_repository/manifests/$registry_tag" \
+                  | tr -d '\r' | awk -F ': ' 'tolower($1) == "ollama-content-digest" { print tolower($2) }')
+                test "$observed_digest" = '${registry_model_manifest_digest}'
+                sudo --user ollama HOME=/var/lib/ollama /usr/bin/ollama pull '${registry_model_reference}'
+                sudo --user ollama HOME=/var/lib/ollama /usr/bin/ollama cp \
+                  '${registry_model_reference}' '${model_name}'
+              else
+                echo 'Unsupported configured model source.' >&2
+                exit 1
+              fi
       - name: RecordBuildProvenance
         action: ExecuteBash
         timeoutSeconds: 60
@@ -185,10 +227,16 @@ phases:
                 "ollama_version": "${ollama_version}",
                 "ollama_sha256": "${ollama_sha256}",
                 "ollama_llm_library": "cuda_v12",
+                "ollama_context_length": 8192,
+                "ollama_keep_alive": "30m",
+                "llama_prompt_cache_mib": 512,
                 "gpu_readiness_probe": "llama-server --list-devices",
                 "model_configured": ${model_enabled},
+                "model_source": "${model_source}",
                 "model_name": "${model_name}",
-                "model_sha256": "${model_sha256}"
+                "model_sha256": "${model_sha256}",
+                "registry_model_reference": "${registry_model_reference}",
+                "registry_model_manifest_digest": "${registry_model_manifest_digest}"
               }
               JSON
               chmod 0444 /etc/private-llm-chat/image-build.json
@@ -206,6 +254,8 @@ phases:
             - curl --fail --silent http://127.0.0.1:11434/api/tags >/dev/null
             - nvidia-smi --query-gpu=name,driver_version --format=csv,noheader
             - systemctl show ollama.service --property Environment --value | grep --fixed-strings --quiet 'OLLAMA_LLM_LIBRARY=cuda_v12'
+            - systemctl show ollama.service --property Environment --value | grep --fixed-strings --quiet 'LLAMA_ARG_CACHE_RAM=512'
             - systemctl show ollama.service --property ExecStartPre --value | grep --fixed-strings --quiet '/usr/local/libexec/private-llm-chat/wait-for-cuda'
+            - test -x /usr/local/libexec/private-llm-chat/verify-ollama-readiness
             - journalctl --unit ollama.service --no-pager | grep --extended-regexp --quiet 'inference compute.*library=CUDA'
             - test -r /etc/private-llm-chat/image-build.json

@@ -185,13 +185,13 @@ variable "ollama_sha256" {
 variable "image_builder_component_version" {
   description = "AWSTOE component version. Bump whenever component templates change."
   type        = string
-  default     = "1.0.5"
+  default     = "1.0.7"
 }
 
 variable "image_builder_recipe_version" {
   description = "Image recipe version. Bump whenever recipe inputs change."
   type        = string
-  default     = "1.0.5"
+  default     = "1.0.7"
 }
 
 variable "image_builder_instance_types" {
@@ -259,6 +259,36 @@ variable "image_builder_model_name" {
   type        = string
   default     = null
   nullable    = true
+}
+
+variable "image_builder_ollama_model_reference" {
+  description = "Optional official Ollama registry model reference, such as qwen3.5:9b. Mutually exclusive with the S3 GGUF source."
+  type        = string
+  default     = null
+  nullable    = true
+
+  validation {
+    condition = (
+      var.image_builder_ollama_model_reference == null ||
+      can(regex("^[a-z0-9][a-z0-9._/-]*:[A-Za-z0-9._-]+$", var.image_builder_ollama_model_reference))
+    )
+    error_message = "image_builder_ollama_model_reference must be a registry model reference such as qwen3.5:9b."
+  }
+}
+
+variable "image_builder_ollama_model_manifest_digest" {
+  description = "Expected 64-character Ollama registry manifest digest for the selected model reference."
+  type        = string
+  default     = null
+  nullable    = true
+
+  validation {
+    condition = (
+      var.image_builder_ollama_model_manifest_digest == null ||
+      can(regex("^[0-9a-fA-F]{64}$", var.image_builder_ollama_model_manifest_digest))
+    )
+    error_message = "image_builder_ollama_model_manifest_digest must be null or a 64-character hexadecimal digest."
+  }
 }
 
 variable "gpu_instance_type" {

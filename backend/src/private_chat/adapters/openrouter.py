@@ -4,6 +4,7 @@ from typing import Any
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
 
+from private_chat.adapters.usage import parse_generation_usage, parse_openrouter_usage
 from private_chat.domain.models import ModelRequest, ModelResponse
 
 
@@ -15,6 +16,7 @@ class OpenRouterConfiguration(BaseModel):
     allowed_providers: tuple[str, ...] = Field(min_length=1)
     base_url: str = "https://openrouter.ai/api/v1"
     zero_data_retention: bool = True
+    max_output_tokens: int = Field(default=4096, ge=1, le=4096)
 
     @field_validator("base_url")
     @classmethod
@@ -53,6 +55,7 @@ class OpenRouterModelClient:
                 "data_collection": "deny",
                 "zdr": True,
             },
+            "max_tokens": self._config.max_output_tokens,
         }
         response = await self._client.post(
             f"{self._config.base_url}/chat/completions",
@@ -74,4 +77,39 @@ class OpenRouterModelClient:
             raise RuntimeError("OpenRouter returned an invalid response") from exc
         if not isinstance(content, str) or not content.strip() or not isinstance(model, str):
             raise RuntimeError("OpenRouter returned an invalid response")
-        return ModelResponse(content=content, model=model, provider=provider)
+        usage = parse_openrouter_usage(body.get("usage"), model=model, provider=provider)
+        if usage is None:
+            generation_id = response.headers.get("x-generation-id") or body.get("id")
+            if isinstance(generation_id, str) and generation_id:
+                generation_response = await self._client.get(
+                    f"{self._config.base_url}/generation",
+                    headers={"Authorization": f"Bearer {self._config.api_key.get_secret_value()}"},
+                    params={"id": generation_id},
+                )
+                if generation_response.is_success:
+                    usage = parse_generation_usage(
+                        generation_response.json(), model=model, provider=provider
+                    )
+        return ModelResponse(content=content, model=model, provider=provider, usage=usage)
+
+    async def verify_zdr_route(self, model_id: str) -> None:
+        """Fail startup if OpenRouter no longer publishes this exact ZDR route."""
+
+        response = await self._client.get("https://openrouter.ai/api/v1/endpoints/zdr")
+        response.raise_for_status()
+        body = response.json()
+        entries = body.get("data") if isinstance(body, Mapping) else None
+        if not isinstance(entries, list):
+            raise RuntimeError("OpenRouter returned an invalid ZDR endpoint catalogue")
+        allowed = set(self._config.allowed_providers)
+        for entry in entries:
+            if not isinstance(entry, Mapping) or entry.get("model_id") != model_id:
+                continue
+            tag = entry.get("tag")
+            provider = str(tag).split("/", 1)[0] if isinstance(tag, str) else ""
+            if provider in allowed and entry.get("status", 0) == 0:
+                return
+        raise RuntimeError(
+            "No configured OpenRouter provider currently offers a verified ZDR route for "
+            + model_id
+        )
