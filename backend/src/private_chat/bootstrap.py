@@ -123,21 +123,14 @@ def create_app(
         )
     else:
         model_options = (ModelOption(settings.model_name, settings.model_name, "test"),)
-    repository: ConversationRepository
     data_keys: DataKeyProvider
     if settings.storage_backend is StorageBackend.S3:
         if settings.conversation_bucket is None or settings.kms_key_id is None:
             raise RuntimeError("Validated AWS storage settings are unexpectedly missing")
-        repository = S3ConversationRepository(
-            boto3.client("s3", region_name=settings.aws_region),
-            settings.conversation_bucket,
-            settings.kms_key_id,
-        )
         data_keys = KmsDataKeyProvider(
             boto3.client("kms", region_name=settings.aws_region), settings.kms_key_id
         )
     elif settings.storage_backend is StorageBackend.MEMORY:
-        repository = InMemoryConversationRepository()
         data_keys = LocalAesDataKeyProvider(settings.local_master_key())
     else:
         data_directory = settings.resolved_local_data_dir()
@@ -147,9 +140,21 @@ def create_app(
             if settings.local_key_mode is LocalKeyMode.DPAPI
             else LocalAesDataKeyProvider(settings.local_master_key())
         )
-        repository = SqliteConversationRepository(database_path)
-
     encryptor = AesGcmEnvelopeEncryptor(data_keys)
+    repository: ConversationRepository
+    if settings.storage_backend is StorageBackend.S3:
+        if settings.conversation_bucket is None or settings.kms_key_id is None:
+            raise RuntimeError("Validated AWS storage settings are unexpectedly missing")
+        repository = S3ConversationRepository(
+            boto3.client("s3", region_name=settings.aws_region),
+            settings.conversation_bucket,
+            settings.kms_key_id,
+            encryptor,
+        )
+    elif settings.storage_backend is StorageBackend.MEMORY:
+        repository = InMemoryConversationRepository(encryptor)
+    else:
+        repository = SqliteConversationRepository(database_path, encryptor)
     catalog = ConfiguredModelCatalog(model_options)
     instructions_provider = FileConversationInstructionsProvider(settings.instructions_file)
     app.state.send_message = SendMessage(

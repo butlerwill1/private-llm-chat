@@ -116,6 +116,17 @@ export class DemoChatApi implements ChatApi {
     return updated
   }
 
+  async renameConversation(conversationId: string, title: string): Promise<Conversation> {
+    const current = await this.getConversation(conversationId)
+    const cleanedTitle = title.trim()
+    if (!cleanedTitle) throw new Error('Conversation title must not be blank.')
+    const updated = { ...current, title: cleanedTitle }
+    this.conversations = this.conversations.map((conversation) =>
+      conversation.id === updated.id ? updated : conversation,
+    )
+    return updated
+  }
+
   async deleteConversation(conversationId: string): Promise<void> {
     this.conversations = this.conversations.filter(({ id }) => id !== conversationId)
     return Promise.resolve()

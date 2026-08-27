@@ -2,6 +2,7 @@
 
 import asyncio
 import os
+import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
@@ -13,6 +14,12 @@ from private_chat.adapters.sqlite_repository import SqliteConversationRepository
 from private_chat.adapters.windows_dpapi import DpapiLocalDataKeyProvider
 from private_chat.application.conversations import message_context
 from private_chat.domain.models import Conversation, Role, StoredMessage
+
+
+def repository_for(database: Path) -> SqliteConversationRepository:
+    return SqliteConversationRepository(
+        database, AesGcmEnvelopeEncryptor(LocalAesDataKeyProvider(b"t" * 32))
+    )
 
 
 def stored(conversation: Conversation, role: Role, body: str) -> StoredMessage:
@@ -32,14 +39,18 @@ def stored(conversation: Conversation, role: Role, body: str) -> StoredMessage:
 @pytest.mark.asyncio
 async def test_sqlite_repository_persists_only_ciphertext_and_deletes_turns(tmp_path: Path) -> None:
     database = tmp_path / "conversations.sqlite3"
-    repository = SqliteConversationRepository(database)
+    repository = repository_for(database)
     conversation = Conversation.create()
     user = stored(conversation, Role.USER, "unique plaintext that must not reach sqlite")
     assistant = stored(conversation, Role.ASSISTANT, "unique encrypted answer")
 
     await repository.create_conversation(conversation)
     await repository.append_turn(conversation.id, user, assistant)
-    restarted = SqliteConversationRepository(database)
+    await repository.rename_conversation(conversation.id, "Private reflections")
+    restarted = repository_for(database)
+    renamed = await restarted.get_conversation(conversation.id)
+    assert renamed is not None
+    assert renamed.title == "Private reflections"
     assert [item.id for item in await restarted.list_messages(conversation.id)] == [
         user.id,
         assistant.id,
@@ -50,13 +61,14 @@ async def test_sqlite_repository_persists_only_ciphertext_and_deletes_turns(tmp_
         else b""
     )
     assert b"unique plaintext that must not reach sqlite" not in raw
+    assert b"Private reflections" not in raw
     assert await restarted.delete_conversation(conversation.id)
     assert await restarted.get_conversation(conversation.id) is None
 
 
 @pytest.mark.asyncio
 async def test_sqlite_repository_keeps_turn_writes_atomic(tmp_path: Path) -> None:
-    repository = SqliteConversationRepository(tmp_path / "conversations.sqlite3")
+    repository = repository_for(tmp_path / "conversations.sqlite3")
     conversation = Conversation.create()
     await repository.create_conversation(conversation)
     user = stored(conversation, Role.USER, "one")
@@ -69,6 +81,48 @@ async def test_sqlite_repository_keeps_turn_writes_atomic(tmp_path: Path) -> Non
         user.id,
         assistant.id,
     ]
+
+
+@pytest.mark.asyncio
+async def test_sqlite_repository_migrates_legacy_plaintext_titles(tmp_path: Path) -> None:
+    database = tmp_path / "conversations.sqlite3"
+    conversation = Conversation.create("Legacy private title")
+    connection = sqlite3.connect(database)
+    connection.executescript(
+        """
+        CREATE TABLE conversations (
+            id TEXT PRIMARY KEY,
+            title TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            active_model_id TEXT
+        );
+        CREATE TABLE messages (
+            id TEXT PRIMARY KEY,
+            conversation_id TEXT NOT NULL,
+            position INTEGER NOT NULL,
+            role TEXT NOT NULL,
+            ciphertext BLOB NOT NULL,
+            nonce BLOB NOT NULL,
+            wrapped_data_key BLOB NOT NULL,
+            key_id TEXT NOT NULL,
+            algorithm TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        );
+        PRAGMA user_version = 2;
+        """
+    )
+    connection.execute(
+        "INSERT INTO conversations(id, title, created_at, active_model_id) VALUES (?, ?, ?, ?)",
+        (str(conversation.id), conversation.title, conversation.created_at.isoformat(), None),
+    )
+    connection.commit()
+    connection.close()
+
+    repository = repository_for(database)
+    migrated = await repository.get_conversation(conversation.id)
+    assert migrated is not None
+    assert migrated.title == "Legacy private title"
+    assert b"Legacy private title" not in database.read_bytes()
 
 
 @pytest.mark.skipif(os.name != "nt", reason="DPAPI is a Windows current-user service")

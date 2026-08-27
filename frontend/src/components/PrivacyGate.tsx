@@ -154,7 +154,7 @@ export function PrivacyGate({ children }: PrivacyGateProps) {
         <p className="privacy-eyebrow">Private Chat</p>
         <h1 id="privacy-title">{isFirstUse ? 'Create a privacy PIN' : 'Private Chat is locked'}</h1>
         <p className="privacy-copy">{isFirstUse ? 'Choose a small PIN or password to keep conversations out of casual view.' : 'Enter your privacy PIN to view conversations.'}</p>
-        <form onSubmit={isFirstUse ? setUpPin : unlock}>
+        <form onSubmit={(event) => { void (isFirstUse ? setUpPin : unlock)(event) }}>
           <label htmlFor="privacy-pin">{isFirstUse ? 'Privacy PIN or password' : 'Privacy PIN'}</label>
           <input id="privacy-pin" type="password" autoComplete={isFirstUse ? 'new-password' : 'current-password'} autoFocus value={pin} disabled={isSubmitting} onChange={(event) => setPin(event.target.value)} />
           {isFirstUse ? <><label htmlFor="privacy-pin-confirmation">Confirm privacy PIN or password</label><input id="privacy-pin-confirmation" type="password" autoComplete="new-password" value={confirmation} disabled={isSubmitting} onChange={(event) => setConfirmation(event.target.value)} /></> : null}

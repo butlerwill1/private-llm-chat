@@ -10,7 +10,14 @@ from uuid import UUID
 from botocore.exceptions import ClientError
 from pydantic import BaseModel, ConfigDict
 
-from private_chat.domain.models import Conversation, EncryptedPayload, Role, StoredMessage
+from private_chat.domain.models import (
+    Conversation,
+    EncryptedPayload,
+    Role,
+    StoredMessage,
+    conversation_title_context,
+)
+from private_chat.ports.interfaces import EnvelopeEncryptor
 
 
 class EncryptedPayloadRecord(BaseModel):
@@ -85,21 +92,14 @@ class ConversationDocument(BaseModel):
     """One versioned S3 object containing metadata and an authoritative transcript."""
 
     model_config = ConfigDict(extra="forbid")
-    schema_version: int = 2
+    schema_version: int = 3
     id: UUID
-    title: str
+    # Retained solely for reading schema v2 documents. New documents keep this blank.
+    title: str = ""
+    encrypted_title: EncryptedPayloadRecord | None = None
     created_at: datetime
     active_model_id: str | None = None
     messages: list[StoredMessageRecord]
-
-    def conversation(self) -> Conversation:
-        return Conversation(
-            id=self.id,
-            title=self.title,
-            created_at=self.created_at,
-            active_model_id=self.active_model_id,
-        )
-
 
 class S3ConversationRepository:
     """Store one conditionally-updated, SSE-KMS object per conversation.
@@ -110,10 +110,13 @@ class S3ConversationRepository:
 
     _prefix = "conversations/"
 
-    def __init__(self, client: Any, bucket: str, kms_key_id: str) -> None:
+    def __init__(
+        self, client: Any, bucket: str, kms_key_id: str, encryptor: EnvelopeEncryptor
+    ) -> None:
         self._client = client
         self._bucket = bucket
         self._kms_key_id = kms_key_id
+        self._encryptor = encryptor
 
     @classmethod
     def _key(cls, conversation_id: UUID) -> str:
@@ -144,10 +147,64 @@ class S3ConversationRepository:
         document = ConversationDocument.model_validate_json(response["Body"].read())
         return document, str(response["ETag"])
 
+    def _conversation(self, document: ConversationDocument) -> Conversation:
+        if document.encrypted_title is None:
+            title = document.title
+        else:
+            title = self._encryptor.decrypt(
+                document.encrypted_title.to_domain(),
+                context=conversation_title_context(document.id),
+            ).decode()
+        return Conversation(
+            id=document.id,
+            title=title,
+            created_at=document.created_at,
+            active_model_id=document.active_model_id,
+        )
+
+    def _encrypted_title(self, conversation_id: UUID, title: str) -> EncryptedPayloadRecord:
+        return EncryptedPayloadRecord.from_domain(
+            self._encryptor.encrypt(
+                title.encode(), context=conversation_title_context(conversation_id)
+            )
+        )
+
+    async def _load_document(
+        self, conversation_id: UUID
+    ) -> tuple[ConversationDocument, str] | None:
+        """Return a document, upgrading a legacy plaintext title with an ETag guard."""
+
+        for _ in range(3):
+            result = await asyncio.to_thread(self._get, conversation_id)
+            if result is None:
+                return None
+            document, etag = result
+            if document.encrypted_title is not None:
+                return result
+            upgraded = document.model_copy(
+                update={
+                    "schema_version": 3,
+                    "title": "",
+                    "encrypted_title": self._encrypted_title(document.id, document.title),
+                }
+            )
+            try:
+                await asyncio.to_thread(
+                    self._put, self._key(conversation_id), upgraded, IfMatch=etag
+                )
+            except ClientError as error:
+                if str(error.response.get("Error", {}).get("Code")) not in {
+                    "PreconditionFailed",
+                    "412",
+                }:
+                    raise
+                continue
+        raise RuntimeError("Conversation changed repeatedly; retry the request")
+
     async def create_conversation(self, conversation: Conversation) -> None:
         document = ConversationDocument(
             id=conversation.id,
-            title=conversation.title,
+            encrypted_title=self._encrypted_title(conversation.id, conversation.title),
             created_at=conversation.created_at,
             active_model_id=conversation.active_model_id,
             messages=[],
@@ -165,8 +222,8 @@ class S3ConversationRepository:
             raise
 
     async def list_conversations(self) -> Sequence[Conversation]:
-        def load_all() -> tuple[Conversation, ...]:
-            conversations: list[Conversation] = []
+        def list_ids() -> tuple[UUID, ...]:
+            conversation_ids: list[UUID] = []
             continuation_token: str | None = None
             while True:
                 request: dict[str, Any] = {
@@ -177,42 +234,54 @@ class S3ConversationRepository:
                     request["ContinuationToken"] = continuation_token
                 page = self._client.list_objects_v2(**request)
                 for item in page.get("Contents", []):
-                    # Titles are currently fixed by the domain factory. S3's listing
-                    # already contains the object key and modification time, so the
-                    # navigation sidebar can avoid fetching or decrypting every
-                    # transcript merely to display a list of conversations.
                     object_id = UUID(
                         str(item["Key"]).removeprefix(self._prefix).removesuffix(".json")
                     )
-                    last_modified = item.get("LastModified")
-                    if isinstance(last_modified, datetime):
-                        conversations.append(
-                            Conversation(
-                                id=object_id,
-                                title="New conversation",
-                                created_at=last_modified,
-                            )
-                        )
-                    else:
-                        # Lightweight test doubles may omit S3's standard
-                        # LastModified field; retain compatibility while real
-                        # S3 avoids this fallback network read.
-                        result = self._get(object_id)
-                        if result is not None:
-                            conversations.append(result[0].conversation())
+                    conversation_ids.append(object_id)
                 if not page.get("IsTruncated"):
                     break
                 continuation_token = str(page["NextContinuationToken"])
-            return tuple(sorted(conversations, key=lambda item: item.created_at, reverse=True))
+            return tuple(conversation_ids)
 
-        return await asyncio.to_thread(load_all)
+        conversations: list[Conversation] = []
+        for conversation_id in await asyncio.to_thread(list_ids):
+            result = await self._load_document(conversation_id)
+            if result is not None:
+                conversations.append(self._conversation(result[0]))
+        return tuple(sorted(conversations, key=lambda item: item.created_at, reverse=True))
 
     async def get_conversation(self, conversation_id: UUID) -> Conversation | None:
-        result = await asyncio.to_thread(self._get, conversation_id)
-        return None if result is None else result[0].conversation()
+        result = await self._load_document(conversation_id)
+        return None if result is None else self._conversation(result[0])
+
+    async def rename_conversation(self, conversation_id: UUID, title: str) -> None:
+        for _ in range(3):
+            result = await self._load_document(conversation_id)
+            if result is None:
+                raise KeyError("Conversation does not exist")
+            document, etag = result
+            updated = document.model_copy(
+                update={
+                    "schema_version": 3,
+                    "title": "",
+                    "encrypted_title": self._encrypted_title(conversation_id, title),
+                }
+            )
+            try:
+                await asyncio.to_thread(
+                    self._put, self._key(conversation_id), updated, IfMatch=etag
+                )
+                return
+            except ClientError as error:
+                if str(error.response.get("Error", {}).get("Code")) not in {
+                    "PreconditionFailed",
+                    "412",
+                }:
+                    raise
+        raise RuntimeError("Conversation changed repeatedly; retry the request")
 
     async def list_messages(self, conversation_id: UUID) -> Sequence[StoredMessage]:
-        result = await asyncio.to_thread(self._get, conversation_id)
+        result = await self._load_document(conversation_id)
         if result is None:
             return ()
         return tuple(record.to_domain() for record in result[0].messages)
@@ -224,7 +293,7 @@ class S3ConversationRepository:
             raise ValueError("Stored messages do not belong to the target conversation")
 
         for _ in range(3):
-            result = await asyncio.to_thread(self._get, conversation_id)
+            result = await self._load_document(conversation_id)
             if result is None:
                 raise KeyError("Conversation does not exist")
             document, etag = result
@@ -261,13 +330,13 @@ class S3ConversationRepository:
         if event.conversation_id != conversation_id:
             raise ValueError("Stored event does not belong to the target conversation")
         for _ in range(3):
-            result = await asyncio.to_thread(self._get, conversation_id)
+            result = await self._load_document(conversation_id)
             if result is None:
                 raise KeyError("Conversation does not exist")
             document, etag = result
             updated = document.model_copy(
                 update={
-                    "schema_version": 2,
+                    "schema_version": 3,
                     "active_model_id": model_id,
                     "messages": [*document.messages, StoredMessageRecord.from_domain(event)],
                 }

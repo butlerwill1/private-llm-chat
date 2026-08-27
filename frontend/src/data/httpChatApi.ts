@@ -1,4 +1,4 @@
-import type { ChatApi, ChatMessage, Conversation, ConversationSummary, CostBasis, ModelConfiguration, ModelOption, SendMessageRequest, TurnUsage } from '../domain/chat'
+import type { ChatApi, ChatMessage, Conversation, ConversationSummary, CostBasis, ModelConfiguration, ModelOption, SendMessageRequest } from '../domain/chat'
 
 interface ApiMessage {
   readonly id: string
@@ -201,6 +201,14 @@ export class HttpChatApi implements ChatApi {
     const value = await readJson(await fetch(
       `${this.baseUrl}/conversations/${encodeURIComponent(conversationId)}/model`,
       { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model_id: modelId }) },
+    ))
+    return toDomain(parseConversation(value))
+  }
+
+  async renameConversation(conversationId: string, title: string): Promise<Conversation> {
+    const value = await readJson(await fetch(
+      `${this.baseUrl}/conversations/${encodeURIComponent(conversationId)}/title`,
+      { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title }) },
     ))
     return toDomain(parseConversation(value))
   }

@@ -12,6 +12,7 @@ from private_chat.api.schemas import (
     HealthResponse,
     ModelConfigurationResponse,
     ModelOptionResponse,
+    RenameConversationRequest,
     SendMessageRequest,
 )
 from private_chat.application.conversations import ConversationService
@@ -151,6 +152,27 @@ async def change_model(
     try:
         return ConversationResponse.from_view(
             await service.change_model(conversation_id, body.model_id), catalog
+        )
+    except KeyError as error:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found"
+        ) from error
+    except ValueError as error:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(error)
+        ) from error
+
+
+@router.patch("/conversations/{conversation_id}/title", response_model=ConversationResponse)
+async def rename_conversation(
+    conversation_id: UUID,
+    body: RenameConversationRequest,
+    service: Annotated[ConversationService, Depends(get_conversations)],
+    catalog: Annotated[ConfiguredModelCatalog, Depends(get_model_catalog)],
+) -> ConversationResponse:
+    try:
+        return ConversationResponse.from_view(
+            await service.rename(conversation_id, body.title), catalog
         )
     except KeyError as error:
         raise HTTPException(

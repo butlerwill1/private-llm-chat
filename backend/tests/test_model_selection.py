@@ -35,7 +35,9 @@ def catalog() -> ConfiguredModelCatalog:
 async def test_switching_model_persists_an_encrypted_event_and_uses_new_model(
     tmp_path: Path,
 ) -> None:
-    repository = InMemoryConversationRepository()
+    repository = InMemoryConversationRepository(
+        AesGcmEnvelopeEncryptor(LocalAesDataKeyProvider(b"m" * 32))
+    )
     encryptor = AesGcmEnvelopeEncryptor(LocalAesDataKeyProvider(b"x" * 32))
     service = ConversationService(repository, encryptor, catalog(), "model-a")
     created = await service.create()

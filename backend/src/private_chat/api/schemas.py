@@ -34,6 +34,11 @@ class ChangeModelRequest(BaseModel):
     model_id: str = Field(min_length=1, max_length=200)
 
 
+class RenameConversationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    title: str = Field(min_length=1, max_length=200)
+
+
 class ModelOptionResponse(BaseModel):
     """A browser-safe configured model choice with no provider credentials."""
 

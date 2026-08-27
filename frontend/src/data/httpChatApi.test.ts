@@ -16,6 +16,7 @@ describe('HttpChatApi', () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify([{
       id: 'conversation-id',
       title: 'New conversation',
+      active_model_id: 'provider/model',
       created_at: '2026-07-21T12:00:00Z',
       messages: [{
         id: 'message-id',
@@ -64,20 +65,40 @@ describe('HttpChatApi', () => {
     )
   })
 
+  it('renames a conversation through the title endpoint', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      id: 'conversation-id', title: 'Weekly reflection', active_model_id: 'provider/model',
+      messages: [],
+    }), { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const renamed = await new HttpChatApi().renameConversation(
+      'conversation/id', 'Weekly reflection',
+    )
+
+    expect(renamed.title).toBe('Weekly reflection')
+    expect(fetchMock).toHaveBeenCalledWith('/v1/conversations/conversation%2Fid/title', {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: 'Weekly reflection' }),
+    })
+  })
+
   it('rejects malformed token-cost metadata', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify([{
       id: 'conversation-id',
       title: 'Bad usage',
+      active_model_id: 'provider/model',
       messages: [{
         id: 'message-id', role: 'assistant', content: 'Private response',
         usage: {
           input_tokens: 1, output_tokens: 1, total_tokens: 2,
           cached_input_tokens: null, cache_write_input_tokens: null, reasoning_tokens: null,
-          cost_usd: 0.002, cost_basis: 'provider_reported', model: 'provider/model', provider: 'provider',
+          cost_usd: 0.002, cost_basis: 'provider_reported', model: 'provider/model',
+          model_label: 'Provider model', provider: 'provider',
         },
       }],
     }]), { status: 200 })))
 
-    await expect(new HttpChatApi().listConversations()).rejects.toThrow('invalid conversation')
+    await expect(new HttpChatApi().listConversations()).rejects.toThrow('invalid message')
   })
 })

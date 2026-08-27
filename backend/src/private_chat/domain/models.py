@@ -72,8 +72,8 @@ class TurnUsage:
 class Conversation:
     """Stable metadata for one encrypted transcript.
 
-    Titles are intentionally generic in the initial application so potentially
-    sensitive message content is not copied into plaintext S3 object metadata.
+    Titles are user-managed metadata and are never inferred from transcript
+    content. Persistence adapters envelope-encrypt them separately from messages.
     """
 
     id: UUID
@@ -96,6 +96,27 @@ class Conversation:
             created_at=datetime.now(UTC),
             active_model_id=active_model_id,
         )
+
+    def renamed(self, title: str) -> "Conversation":
+        """Return the same conversation with a validated, user-supplied title."""
+
+        cleaned_title = title.strip()
+        if not cleaned_title:
+            raise ValueError("Conversation title must not be blank")
+        if len(cleaned_title) > 200:
+            raise ValueError("Conversation title must be 200 characters or fewer")
+        return Conversation(
+            id=self.id,
+            title=cleaned_title,
+            created_at=self.created_at,
+            active_model_id=self.active_model_id,
+        )
+
+
+def conversation_title_context(conversation_id: UUID) -> bytes:
+    """Bind a title ciphertext to one conversation and its metadata field."""
+
+    return f"conversation={conversation_id};field=title".encode()
 
 
 @dataclass(frozen=True, slots=True)

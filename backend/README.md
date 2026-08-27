@@ -7,11 +7,15 @@ can be tested without a network or framework.
 
 ## Security posture
 
-- Message content is encrypted before it reaches any repository. Default personal
-  mode uses local SQLite and a Windows DPAPI-protected master key; S3/KMS remains
-  an optional AWS adapter.
-- Each message gets a random AES-256-GCM data key. Authenticated context binds ciphertext to
-  its conversation and message identifiers.
+- Message content and conversation titles are encrypted before they reach any
+  repository. Default personal mode uses local SQLite and a Windows
+  DPAPI-protected master key; S3/KMS remains an optional AWS adapter.
+- Each message and title gets a random AES-256-GCM data key. Authenticated context
+  binds a ciphertext to its conversation and specific field, so it cannot be
+  substituted for a different record.
+- Existing SQLite and S3 documents with plaintext legacy titles are migrated to
+  encrypted titles when the app first reads them. Conversation IDs, creation times,
+  active model IDs and message ordering remain storage metadata.
 - OpenRouter calls always request zero-data-retention, deny data collection, disable provider
   fallbacks and use a non-empty provider allow-list. Responses without a confirmed allowed
   provider are rejected.

@@ -223,6 +223,28 @@ async def test_conversation_lifecycle() -> None:
     assert missing.status_code == 404
 
 
+@pytest.mark.asyncio
+async def test_conversation_title_can_be_manually_renamed() -> None:
+    app = create_app(make_settings(), model_client=StubModel())
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        created = await client.post("/v1/conversations")
+        conversation_id = created.json()["id"]
+        renamed = await client.patch(
+            f"/v1/conversations/{conversation_id}/title",
+            json={"title": "  Planning the next project  "},
+        )
+        summaries = await client.get("/v1/conversation-summaries")
+        blank = await client.patch(
+            f"/v1/conversations/{conversation_id}/title", json={"title": "   "}
+        )
+
+    assert renamed.status_code == 200
+    assert renamed.json()["title"] == "Planning the next project"
+    assert summaries.json()[0]["title"] == "Planning the next project"
+    assert blank.status_code == 422
+
+
 @pytest.mark.skipif(os.name != "nt", reason="The normal local key mode uses Windows DPAPI")
 @pytest.mark.asyncio
 async def test_default_local_storage_survives_application_restart(tmp_path: Path) -> None:

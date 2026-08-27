@@ -63,6 +63,7 @@ export interface ChatApi {
   listModels(): Promise<readonly ModelOption[]>
   getModelConfiguration(): Promise<ModelConfiguration>
   createConversation(request: CreateConversationRequest): Promise<Conversation>
+  renameConversation(conversationId: string, title: string): Promise<Conversation>
   changeModel(conversationId: string, modelId: string): Promise<Conversation>
   sendMessage(request: SendMessageRequest): Promise<Conversation>
   deleteConversation(conversationId: string): Promise<void>

@@ -15,8 +15,18 @@ import pytest
 from botocore.exceptions import ClientError
 
 from private_chat.adapters.aws_kms import KmsDataKeyProvider
-from private_chat.adapters.s3_repository import S3ConversationRepository
+from private_chat.adapters.encryption import AesGcmEnvelopeEncryptor, LocalAesDataKeyProvider
+from private_chat.adapters.s3_repository import ConversationDocument, S3ConversationRepository
 from private_chat.domain.models import Conversation, EncryptedPayload, Role, StoredMessage
+
+
+def repository_for(client: Any) -> S3ConversationRepository:
+    return S3ConversationRepository(
+        client,
+        "private-bucket",
+        "kms-key",
+        AesGcmEnvelopeEncryptor(LocalAesDataKeyProvider(b"s" * 32)),
+    )
 
 
 def client_error(code: str, operation: str) -> ClientError:
@@ -115,7 +125,7 @@ async def test_s3_repository_round_trip_and_permanent_delete() -> None:
 
     # Arrange the fake boto3 client and inject it into the real repository adapter.
     client = FakeS3()
-    repository = S3ConversationRepository(client, "private-bucket", "kms-key")
+    repository = repository_for(client)
     conversation = Conversation.create()
     # The repository receives already-encrypted payloads. Fixed bytes make their
     # serialised base64 form easy to locate later in the stored JSON document.
@@ -146,19 +156,23 @@ async def test_s3_repository_round_trip_and_permanent_delete() -> None:
     # Act: create an empty document and conditionally append a complete turn.
     await repository.create_conversation(conversation)
     await repository.append_turn(conversation.id, user, assistant)
+    await repository.rename_conversation(conversation.id, "Private reflections")
 
     # Domain objects reconstructed from S3 must retain identity and message order.
-    assert await repository.get_conversation(conversation.id) == conversation
+    renamed = await repository.get_conversation(conversation.id)
+    assert renamed is not None
+    assert renamed.title == "Private reflections"
     assert [item.id for item in await repository.list_messages(conversation.id)] == [
         user.id,
         assistant.id,
     ]
-    assert (await repository.list_conversations())[0] == conversation
+    assert (await repository.list_conversations())[0].title == "Private reflections"
     # The fake has one object. iter(...), next(...) selects its tuple, and [0]
     # selects the raw body bytes from (body, ETag, version ID).
     stored_json = next(iter(client.objects.values()))[0]
     # Binary ciphertext is represented safely in JSON rather than decoded or lost.
     assert base64.b64encode(payload.ciphertext) in stored_json
+    assert b"Private reflections" not in stored_json
     # True means data existed and was removed; the second call returning False
     # establishes idempotent behaviour once no recoverable versions remain.
     assert await repository.delete_conversation(conversation.id) is True
@@ -184,7 +198,7 @@ async def test_s3_delete_fails_closed_on_partial_failure() -> None:
 
     # Arrange one existing object so the repository has a version to delete.
     client = PartiallyFailingS3()
-    repository = S3ConversationRepository(client, "private-bucket", "kms-key")
+    repository = repository_for(client)
     conversation = Conversation.create()
     await repository.create_conversation(conversation)
 
@@ -195,6 +209,31 @@ async def test_s3_delete_fails_closed_on_partial_failure() -> None:
     # The fake deliberately retains the object, demonstrating why the adapter
     # must surface the failure instead of returning a successful deletion result.
     assert await repository.get_conversation(conversation.id) == conversation
+
+
+@pytest.mark.asyncio
+async def test_s3_repository_migrates_legacy_plaintext_title() -> None:
+    client = FakeS3()
+    repository = repository_for(client)
+    conversation = Conversation.create("Legacy private title")
+    legacy_document = ConversationDocument(
+        schema_version=2,
+        id=conversation.id,
+        title=conversation.title,
+        created_at=conversation.created_at,
+        messages=[],
+    )
+    client.put_object(
+        Bucket="private-bucket",
+        Key=S3ConversationRepository._key(conversation.id),
+        Body=legacy_document.model_dump_json().encode(),
+    )
+
+    migrated = await repository.get_conversation(conversation.id)
+    assert migrated is not None
+    assert migrated.title == "Legacy private title"
+    stored_json = next(iter(client.objects.values()))[0]
+    assert b"Legacy private title" not in stored_json
 
 
 class FakeKms:

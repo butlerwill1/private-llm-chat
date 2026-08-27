@@ -43,6 +43,12 @@ class RecordingModelClient:
         )
 
 
+def make_repository() -> InMemoryConversationRepository:
+    return InMemoryConversationRepository(
+        AesGcmEnvelopeEncryptor(LocalAesDataKeyProvider(b"r" * 32))
+    )
+
+
 @pytest.mark.asyncio
 async def test_turn_is_stored_encrypted_and_history_is_rehydrated() -> None:
     """Each turn is encrypted at rest while later prompts receive plaintext history.
@@ -54,7 +60,7 @@ async def test_turn_is_stored_encrypted_and_history_is_rehydrated() -> None:
 
     # Arrange the three dependencies required by SendMessage: persistence,
     # encryption and inference. All are local and deterministic in this test.
-    repository = InMemoryConversationRepository()
+    repository = make_repository()
     model = RecordingModelClient()
     encryptor = AesGcmEnvelopeEncryptor(LocalAesDataKeyProvider(b"x" * 32))
     use_case = SendMessage(repository, encryptor, model, "m1")
@@ -114,7 +120,7 @@ async def test_blank_message_is_rejected_before_model_call() -> None:
     # Arrange a valid existing conversation so blank content is the only invalid
     # part of the command and therefore the certain cause of the exception.
     model = RecordingModelClient()
-    repository = InMemoryConversationRepository()
+    repository = make_repository()
     conversation = Conversation.create()
     await repository.create_conversation(conversation)
     use_case = SendMessage(
@@ -142,7 +148,7 @@ async def test_unknown_conversation_is_rejected_before_model_call() -> None:
     # inserted before executing the command.
     model = RecordingModelClient()
     use_case = SendMessage(
-        InMemoryConversationRepository(),
+        make_repository(),
         AesGcmEnvelopeEncryptor(LocalAesDataKeyProvider(b"x" * 32)),
         model,
         "m1",

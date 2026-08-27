@@ -7,16 +7,24 @@ from datetime import datetime
 from pathlib import Path
 from uuid import UUID
 
-from private_chat.domain.models import Conversation, EncryptedPayload, Role, StoredMessage
+from private_chat.domain.models import (
+    Conversation,
+    EncryptedPayload,
+    Role,
+    StoredMessage,
+    conversation_title_context,
+)
+from private_chat.ports.interfaces import EnvelopeEncryptor
 
 
 class SqliteConversationRepository:
     """Store transcript ciphertext locally; plaintext never reaches SQLite."""
 
-    _schema_version = 2
+    _schema_version = 3
 
-    def __init__(self, database_path: Path) -> None:
+    def __init__(self, database_path: Path, encryptor: EnvelopeEncryptor) -> None:
         self._path = database_path
+        self._encryptor = encryptor
         self._path.parent.mkdir(parents=True, exist_ok=True)
         self._initialise()
 
@@ -32,7 +40,7 @@ class SqliteConversationRepository:
         connection = self._connect()
         try:
             version = int(connection.execute("PRAGMA user_version").fetchone()[0])
-            if version not in (0, 1, self._schema_version):
+            if version not in (0, 1, 2, self._schema_version):
                 raise RuntimeError(f"Unsupported local conversation schema version {version}")
             connection.execute("PRAGMA journal_mode = WAL")
             if version == 0:
@@ -41,7 +49,12 @@ class SqliteConversationRepository:
                     BEGIN;
                     CREATE TABLE conversations (
                         id TEXT PRIMARY KEY,
-                        title TEXT NOT NULL,
+                        title TEXT NOT NULL DEFAULT '',
+                        title_ciphertext BLOB,
+                        title_nonce BLOB,
+                        title_wrapped_data_key BLOB,
+                        title_key_id TEXT,
+                        title_algorithm TEXT,
                         created_at TEXT NOT NULL,
                         active_model_id TEXT
                     );
@@ -61,7 +74,7 @@ class SqliteConversationRepository:
                     );
                     CREATE INDEX messages_conversation_position
                         ON messages(conversation_id, position);
-                    PRAGMA user_version = 2;
+                    PRAGMA user_version = 3;
                     COMMIT;
                     """
                 )
@@ -70,18 +83,70 @@ class SqliteConversationRepository:
                     """
                     BEGIN;
                     ALTER TABLE conversations ADD COLUMN active_model_id TEXT;
-                    PRAGMA user_version = 2;
+                    ALTER TABLE conversations ADD COLUMN title_ciphertext BLOB;
+                    ALTER TABLE conversations ADD COLUMN title_nonce BLOB;
+                    ALTER TABLE conversations ADD COLUMN title_wrapped_data_key BLOB;
+                    ALTER TABLE conversations ADD COLUMN title_key_id TEXT;
+                    ALTER TABLE conversations ADD COLUMN title_algorithm TEXT;
+                    PRAGMA user_version = 3;
                     COMMIT;
                     """
+                )
+            elif version == 2:
+                connection.executescript(
+                    """
+                    BEGIN;
+                    ALTER TABLE conversations ADD COLUMN title_ciphertext BLOB;
+                    ALTER TABLE conversations ADD COLUMN title_nonce BLOB;
+                    ALTER TABLE conversations ADD COLUMN title_wrapped_data_key BLOB;
+                    ALTER TABLE conversations ADD COLUMN title_key_id TEXT;
+                    ALTER TABLE conversations ADD COLUMN title_algorithm TEXT;
+                    PRAGMA user_version = 3;
+                    COMMIT;
+                    """
+                )
+            legacy_rows = connection.execute(
+                "SELECT id, title FROM conversations WHERE title_ciphertext IS NULL"
+            ).fetchall()
+            for row in legacy_rows:
+                conversation_id = UUID(str(row["id"]))
+                payload = self._encryptor.encrypt(
+                    str(row["title"]).encode(), context=conversation_title_context(conversation_id)
+                )
+                connection.execute(
+                    "UPDATE conversations SET title = '', title_ciphertext = ?, title_nonce = ?, "
+                    "title_wrapped_data_key = ?, title_key_id = ?, "
+                    "title_algorithm = ? WHERE id = ?",
+                    (
+                        payload.ciphertext,
+                        payload.nonce,
+                        payload.wrapped_data_key,
+                        payload.key_id,
+                        payload.algorithm,
+                        str(conversation_id),
+                    ),
                 )
         finally:
             connection.close()
 
-    @staticmethod
-    def _conversation(row: sqlite3.Row) -> Conversation:
+    def _conversation(self, row: sqlite3.Row) -> Conversation:
+        conversation_id = UUID(str(row["id"]))
+        if row["title_ciphertext"] is None:
+            title = str(row["title"])
+        else:
+            title = self._encryptor.decrypt(
+                EncryptedPayload(
+                    ciphertext=bytes(row["title_ciphertext"]),
+                    nonce=bytes(row["title_nonce"]),
+                    wrapped_data_key=bytes(row["title_wrapped_data_key"]),
+                    key_id=str(row["title_key_id"]),
+                    algorithm=str(row["title_algorithm"]),
+                ),
+                context=conversation_title_context(conversation_id),
+            ).decode()
         return Conversation(
-            UUID(str(row["id"])),
-            str(row["title"]),
+            conversation_id,
+            title,
             datetime.fromisoformat(str(row["created_at"])),
             None if row["active_model_id"] is None else str(row["active_model_id"]),
         )
@@ -106,12 +171,21 @@ class SqliteConversationRepository:
         def create() -> None:
             connection = self._connect()
             try:
+                payload = self._encryptor.encrypt(
+                    conversation.title.encode(), context=conversation_title_context(conversation.id)
+                )
                 connection.execute(
-                    "INSERT INTO conversations(id, title, created_at, active_model_id) "
-                    "VALUES (?, ?, ?, ?)",
+                    "INSERT INTO conversations(id, title, title_ciphertext, title_nonce, "
+                    "title_wrapped_data_key, title_key_id, title_algorithm, "
+                    "created_at, active_model_id) "
+                    "VALUES (?, '', ?, ?, ?, ?, ?, ?, ?)",
                     (
                         str(conversation.id),
-                        conversation.title,
+                        payload.ciphertext,
+                        payload.nonce,
+                        payload.wrapped_data_key,
+                        payload.key_id,
+                        payload.algorithm,
                         conversation.created_at.isoformat(),
                         conversation.active_model_id,
                     ),
@@ -128,7 +202,8 @@ class SqliteConversationRepository:
             connection = self._connect()
             try:
                 rows = connection.execute(
-                    "SELECT id, title, created_at, active_model_id FROM conversations "
+                    "SELECT id, title, title_ciphertext, title_nonce, title_wrapped_data_key, "
+                    "title_key_id, title_algorithm, created_at, active_model_id FROM conversations "
                     "ORDER BY created_at DESC"
                 ).fetchall()
                 return tuple(self._conversation(row) for row in rows)
@@ -142,7 +217,9 @@ class SqliteConversationRepository:
             connection = self._connect()
             try:
                 row = connection.execute(
-                    "SELECT id, title, created_at, active_model_id FROM conversations WHERE id = ?",
+                    "SELECT id, title, title_ciphertext, title_nonce, title_wrapped_data_key, "
+                    "title_key_id, title_algorithm, created_at, active_model_id "
+                    "FROM conversations WHERE id = ?",
                     (str(conversation_id),),
                 ).fetchone()
                 return None if row is None else self._conversation(row)
@@ -150,6 +227,33 @@ class SqliteConversationRepository:
                 connection.close()
 
         return await asyncio.to_thread(get)
+
+    async def rename_conversation(self, conversation_id: UUID, title: str) -> None:
+        def rename() -> None:
+            connection = self._connect()
+            try:
+                payload = self._encryptor.encrypt(
+                    title.encode(), context=conversation_title_context(conversation_id)
+                )
+                updated = connection.execute(
+                    "UPDATE conversations SET title = '', title_ciphertext = ?, title_nonce = ?, "
+                    "title_wrapped_data_key = ?, title_key_id = ?, "
+                    "title_algorithm = ? WHERE id = ?",
+                    (
+                        payload.ciphertext,
+                        payload.nonce,
+                        payload.wrapped_data_key,
+                        payload.key_id,
+                        payload.algorithm,
+                        str(conversation_id),
+                    ),
+                ).rowcount
+                if updated == 0:
+                    raise KeyError("Conversation does not exist")
+            finally:
+                connection.close()
+
+        await asyncio.to_thread(rename)
 
     async def list_messages(self, conversation_id: UUID) -> Sequence[StoredMessage]:
         def list_all() -> tuple[StoredMessage, ...]:

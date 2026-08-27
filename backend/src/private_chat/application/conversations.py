@@ -76,6 +76,17 @@ class ConversationService:
             raise KeyError("Conversation does not exist")
         return view
 
+    async def rename(self, conversation_id: UUID, title: str) -> ConversationView:
+        current = await self._repository.get_conversation(conversation_id)
+        if current is None:
+            raise KeyError("Conversation does not exist")
+        renamed = current.renamed(title)
+        await self._repository.rename_conversation(conversation_id, renamed.title)
+        view = await self.get(conversation_id)
+        if view is None:
+            raise KeyError("Conversation does not exist")
+        return view
+
     async def get(self, conversation_id: UUID) -> ConversationView | None:
         conversation = await self._repository.get_conversation(conversation_id)
         if conversation is None:

@@ -20,6 +20,7 @@ export function App({ api, initialConversations, initialSummaries, models, model
   const [selectedId, setSelectedId] = useState(initialSummaries[0]?.id ?? '')
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [isSending, setIsSending] = useState(false)
+  const [isRenaming, setIsRenaming] = useState(false)
   const [isLoadingConversation, setIsLoadingConversation] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [selectedModelId, setSelectedModelId] = useState(models[0]?.id ?? '')
@@ -95,6 +96,25 @@ export function App({ api, initialConversations, initialSummaries, models, model
     }
   }
 
+  const renameConversation = async (title: string) => {
+    if (!selectedConversation || title === selectedConversation.title) return
+    setIsRenaming(true)
+    setError(null)
+    try {
+      const updated = await api.renameConversation(selectedConversation.id, title)
+      startTransition(() => {
+        setConversations((current) => current.map((item) => item.id === updated.id ? updated : item))
+        setSummaries((current) => current.map((item) =>
+          item.id === updated.id ? { ...item, title: updated.title } : item,
+        ))
+      })
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'The conversation could not be renamed.')
+    } finally {
+      setIsRenaming(false)
+    }
+  }
+
   const deleteConversation = async () => {
     if (!selectedConversation
       || !window.confirm('Delete this conversation and its encrypted transcript?')) return
@@ -141,11 +161,13 @@ export function App({ api, initialConversations, initialSummaries, models, model
       />
       <main className="chat-main">
         <ConversationHeader
+          key={selectedConversation?.id}
           title={selectedConversation?.title ?? 'Loading conversation'}
           onDelete={() => void deleteConversation()}
           models={models}
           activeModelId={selectedConversation?.activeModelId ?? null}
-          disabled={isSending}
+          disabled={isSending || isRenaming}
+          onRename={(title) => void renameConversation(title)}
           onChangeModel={(modelId) => void changeModel(modelId)}
         />
         {selectedConversation ? <MessageList messages={selectedConversation.messages} /> : <p className="conversation-loading">Loading encrypted conversation…</p>}

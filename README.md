@@ -1,4 +1,4 @@
-# Private Chat on AWS
+# Private Chat
 
 Private Chat is a loopback-only personal chatbot with application-encrypted conversation storage and replaceable model backends. Its normal mode stores encrypted transcripts in a local SQLite database and uses privacy-restricted OpenRouter inference. The AWS GPU path remains optional infrastructure that can be rebuilt with Terraform when needed.
 
@@ -9,11 +9,13 @@ This repository implements the engineering foundation from the [project brief](P
 ## What is included
 
 - A Python 3.12 FastAPI backend with Pydantic v2 validation.
-- Ports-and-adapters boundaries for model inference, encrypted persistence, key management and GPU lifecycle control.
+- Ports-and-adapters boundaries for model inference, the approved model catalogue, private conversation instructions, encrypted persistence, key management and GPU lifecycle control.
 - An OpenRouter adapter that always supplies ZDR, denies provider data collection, disables fallbacks and requires an allowlist.
 - A private self-hosted adapter for Ollama or vLLM-compatible endpoints.
-- AES-256-GCM envelope-encryption primitives and safe in-memory development adapters.
-- A React and TypeScript chat interface connected to the typed FastAPI conversation API.
+- AES-256-GCM envelope encryption for message content and user-managed conversation titles.
+- A React and TypeScript chat interface with editable conversation names, connected to the typed FastAPI conversation API.
+- Conversation-level model selection for new and active chats, with encrypted model-change timeline events.
+- Per-assistant-message model, token and provider-reported cost information that remains attached to the response that generated it.
 - Terraform for private networking, KMS, encrypted conversation storage and an optional default-off GPU host.
 - An opt-in EC2 Image Builder pipeline that produces a tested, private Ollama GPU AMI from pinned and checksum-verified inputs.
 - An opt-in private S3 model landing bucket and script for staging a pinned, checksum-verified Hugging Face GGUF.
@@ -34,6 +36,60 @@ Both modes use the same React interface and FastAPI API. The model selector is p
 The hosted adapter sends only the model request and required routing controls. It deliberately does not attach OpenRouter's optional user, session, referral, title, trace or arbitrary metadata fields. This separates an OpenRouter account from the downstream provider, but does not make text that identifies its author anonymous.
 
 For a private GPU session, follow the [personal session runbook](ops/runbooks/personal-session.md). For OpenRouter-only mode, use the dedicated section in the same runbook.
+
+## Model selection and message provenance
+
+The model selector is available before creating a conversation, in the active
+conversation header and in Settings. A mid-conversation change takes effect on
+the next response and retains the eligible conversation history. The backend
+validates every selection against its server-controlled catalogue; restricting
+the browser selector alone is not treated as a security control.
+
+Each assistant response retains the exact model ID, display name, provider,
+token usage and available cost information reported for that generation.
+Changing the active model later does not relabel historical responses. Model
+change events are stored in the encrypted timeline but are excluded from model
+context and token accounting.
+
+Gemini 3.7 Flash is the default for a new conversation. The approved catalogue
+is grouped below; startup ZDR validation fails closed if a configured model no
+longer has its approved route.
+
+| Family | Display name | OpenRouter model ID |
+|---|---|---|
+| Google | Gemini 3.7 Flash | `google/gemini-3.7-flash` |
+| Mistral | Ministral 3B | `mistralai/ministral-3b-2512` |
+| Mistral | Ministral 14B | `mistralai/ministral-14b-2512` |
+| Mistral | Mistral Small 3 | `mistralai/mistral-small-2603` |
+| Mistral | Mistral Medium 3.5 | `mistralai/mistral-medium-3-5` |
+| Mistral | Mistral Large | `mistralai/mistral-large-2512` |
+| OpenAI | GPT-5.6 Luna | `openai/gpt-5.6-luna` |
+| OpenAI | GPT-5.6 Terra | `openai/gpt-5.6-terra` |
+| OpenAI | GPT-5.6 Sol | `openai/gpt-5.6-sol` |
+| DeepSeek | DeepSeek V4 Flash | `deepseek/deepseek-v4-flash` |
+| DeepSeek | DeepSeek V4 Pro | `deepseek/deepseek-v4-pro` |
+| Qwen | Qwen 3.8 27B | `qwen/qwen3.8-27b` |
+| Qwen | Qwen 3.8 2.4T A95B | `qwen/qwen3.8-2.4t-a95b` |
+| Anthropic | Claude Sonnet 5 | `anthropic/claude-sonnet-5` |
+| Anthropic | Claude Opus 5 | `anthropic/claude-opus-5` |
+
+The canonical IDs and their pinned downstream routes live in
+[`backend/src/private_chat/config.py`](backend/src/private_chat/config.py).
+
+## Private conversation instructions
+
+Optional private instructions are loaded from the ignored local file
+`.local/conversation-instructions.md` by default. They are injected as a system
+message for inference, but are never stored as a conversation message, returned
+through the API or intentionally written to logs. The local instructions created
+for this installation are supportive and reflection-oriented while avoiding
+diagnosis, clinical claims, dependency-building or presenting the application
+as a therapist.
+
+To use a different ignored file, set `CHAT_INSTRUCTIONS_FILE` in
+`backend/.env`. If the configured file is absent or empty, the backend continues
+without it and emits a non-sensitive warning. Keep both the instruction body and
+`backend/.env` out of Git; `.local/` and local environment files are ignored.
 
 ## Architecture
 
@@ -67,6 +123,7 @@ See [the architecture guide](docs/architecture.md) and [architecture decisions](
 ```text
 backend/        FastAPI service, domain logic, adapters and tests
 frontend/       React/Vite interface and component tests
+scripts/        One-command local launcher and operational helpers
 terraform/      AWS infrastructure with an optional private GPU host
 docs/           Architecture, ADRs, design reference and threat model
 ops/            Operational runbooks
@@ -77,12 +134,14 @@ ops/            Operational runbooks
 
 ### Requirements
 
-- Python 3.12
-- Node.js 20 or later
+- Python 3.12 or later
+- Node.js 20.19 or later
 - pnpm 11
 - Terraform 1.8 or later for infrastructure validation
 
-### Backend
+### First-time local setup
+
+Run these commands once from the repository root:
 
 ```powershell
 cd backend
@@ -90,28 +149,58 @@ python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -e ".[dev]"
 Copy-Item .env.example .env
-```
-
-Copy the local configuration, set a real OpenRouter API key, then start the full local app:
-
-```powershell
-..\scripts\start-chat-app.ps1
-```
-
-For backend-only work, use:
-
-```powershell
-..\scripts\start-local-chat.ps1
-```
-
-The development API listens on `http://127.0.0.1:8000`.
-
-### Frontend
-
-```powershell
-cd frontend
+cd ..\frontend
 pnpm install --frozen-lockfile
-pnpm dev
+cd ..
+```
+
+Open `backend/.env` and replace
+`REPLACE_WITH_YOUR_OPENROUTER_API_KEY` with a real OpenRouter API key. The file
+is ignored by Git but contains a spend-capable plaintext credential, so do not
+share, commit or screenshot it.
+
+The virtual environment does not need to be activated when using the combined
+launcher; it selects `backend/.venv/Scripts/python.exe` automatically.
+
+### Start the programme
+
+For normal use, open PowerShell in the repository root and run this single
+command:
+
+```powershell
+.\scripts\start-chat-app.ps1
+```
+
+It starts the FastAPI backend and React frontend as hidden loopback-only
+processes, waits for both to become ready and opens the interface at
+<http://127.0.0.1:5173>. It reuses either process if its expected port is already
+listening, writes startup logs under the ignored `.local/runtime-logs` folder
+and does not start or contact AWS infrastructure.
+
+If PowerShell blocks local scripts, allow this script only for the current
+PowerShell process and run it again:
+
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass
+.\scripts\start-chat-app.ps1
+```
+
+The backend health endpoint is <http://127.0.0.1:8000/v1/health>. For
+backend-only development, run `scripts/start-local-chat.ps1` instead.
+
+### Start the services separately for development
+
+The combined launcher is the normal workflow. When actively developing one
+side, the services can still be run separately:
+
+```powershell
+cd backend
+.\.venv\Scripts\Activate.ps1
+python -m uvicorn private_chat.main:app --reload --host 127.0.0.1 --port 8000
+
+# In a second PowerShell window:
+cd frontend
+pnpm run dev -- --host 127.0.0.1 --port 5173
 ```
 
 The interface calls the local FastAPI backend through Vite's same-origin `/v1`
@@ -169,6 +258,8 @@ Continuous integration runs the corresponding checks for pull requests and chang
 - Prompt and response bodies must never enter application, API Gateway, tracing or infrastructure logs.
 - The browser must never receive OpenRouter or AWS credentials.
 - OpenRouter policy is enforced inside its adapter so route handlers cannot accidentally omit ZDR, provider pinning, data-collection denial or disabled fallbacks.
+- OpenRouter can associate requests with the account and billing relationship. Downstream providers receive no intentionally forwarded personal account identifier, but identifiable text inside a prompt can still identify its author.
+- Private conversation instructions remain local configuration; they are not part of persisted or API-visible conversation history.
 - The optional GPU is private compute. It receives no public IP, and its model port accepts traffic only from the application security group.
 - Local encryption and repository adapters are development implementations. Production requires AWS KMS and durable encrypted storage adapters.
 

@@ -57,6 +57,18 @@ describe('Private Chat', () => {
     expect(await screen.findByRole('heading', { name: 'New conversation' })).toBeInTheDocument()
   })
 
+  it('renames the selected conversation', async () => {
+    const { user } = await renderApp()
+    await user.click(screen.getByRole('button', { name: 'Edit name' }))
+    const input = screen.getByRole('textbox', { name: 'Conversation name' })
+    await user.clear(input)
+    await user.type(input, 'Weekly reflection')
+    await user.click(screen.getByRole('button', { name: 'Save' }))
+
+    expect(await screen.findByRole('heading', { name: 'Weekly reflection' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Weekly reflection' })).toBeInTheDocument()
+  })
+
   it('sends a message through the API boundary', async () => {
     // Interact through accessible controls as a user would. Seeing both messages
     // verifies the user's text reached the API and its returned state replaced

@@ -63,6 +63,11 @@ class ConversationRepository(Protocol):
 
         ...
 
+    async def rename_conversation(self, conversation_id: UUID, title: str) -> None:
+        """Persist a validated title or raise when the conversation does not exist."""
+
+        ...
+
     async def list_messages(self, conversation_id: UUID) -> Sequence[StoredMessage]:
         """Return stored messages in their authoritative conversation order."""
 
