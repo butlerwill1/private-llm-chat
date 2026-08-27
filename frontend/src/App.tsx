@@ -11,9 +11,10 @@ interface AppProps {
   readonly initialSummaries: readonly ConversationSummary[]
   readonly models: readonly ModelOption[]
   readonly modelConfiguration: ModelConfiguration
+  readonly onLock: () => void
 }
 
-export function App({ api, initialConversations, initialSummaries, models, modelConfiguration }: AppProps) {
+export function App({ api, initialConversations, initialSummaries, models, modelConfiguration, onLock }: AppProps) {
   const [conversations, setConversations] = useState<readonly Conversation[]>(() => initialConversations)
   const [summaries, setSummaries] = useState<readonly ConversationSummary[]>(() => initialSummaries)
   const [selectedId, setSelectedId] = useState(initialSummaries[0]?.id ?? '')
@@ -128,6 +129,7 @@ export function App({ api, initialConversations, initialSummaries, models, model
 
   return (
     <div className="app-shell">
+      <button className="privacy-lock-button" type="button" onClick={onLock}>Lock now</button>
       <Sidebar
         conversations={summaries}
         selectedId={selectedId}

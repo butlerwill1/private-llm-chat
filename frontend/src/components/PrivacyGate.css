@@ -1,0 +1,18 @@
+.privacy-lock-button { position: fixed; z-index: 10; top: 18px; right: 22px; padding: 8px 11px; border: 1px solid #d7d9d8; border-radius: 5px; color: #121515; background: #fff; cursor: pointer; white-space: nowrap; }
+.privacy-lock-button:hover { border-color: #006b3c; color: #006b3c; }
+.privacy-gate { display: grid; min-height: 100vh; padding: 24px; place-items: center; background: radial-gradient(circle at top, #173023 0, #090b0a 52%); }
+.privacy-card { width: min(430px, 100%); padding: 34px; border: 1px solid #2b332f; border-radius: 12px; color: #edf2ef; background: #121714; box-shadow: 0 20px 55px rgba(0, 0, 0, 0.5); }
+.privacy-eyebrow { margin: 0 0 10px; color: #53c78b; font-size: 14px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
+.privacy-card h1 { margin: 0; font-family: Georgia, "Times New Roman", serif; font-size: 32px; font-weight: 400; }
+.privacy-copy { margin: 12px 0 26px; color: #a5aea9; line-height: 1.5; }
+.privacy-card form { display: grid; gap: 9px; }
+.privacy-card label { font-size: 14px; font-weight: 600; }
+.privacy-card input { height: 44px; padding: 0 12px; margin-bottom: 9px; border: 1px solid #4d5a53; border-radius: 6px; color: #edf2ef; background: #1a211d; }
+.privacy-card button { min-height: 44px; margin-top: 9px; border: 1px solid #53c78b; border-radius: 6px; color: #092014; background: #53c78b; font-weight: 700; cursor: pointer; }
+.privacy-card button:disabled { cursor: not-allowed; opacity: 0.6; }
+.privacy-error { margin: 2px 0 0; color: #ffaaaa; font-size: 14px; }
+.privacy-note { margin: 22px 0 0; color: #a5aea9; font-size: 12px; line-height: 1.5; }
+
+@media (max-width: 900px) {
+  .privacy-lock-button { top: 12px; right: 16px; padding: 7px 9px; font-size: 13px; }
+}

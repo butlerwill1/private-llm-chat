@@ -27,7 +27,7 @@ async function renderApp() {
   // JSDOM. Object spread combines render's query helpers with `user` in one result.
   return {
     user: userEvent.setup(),
-    ...render(<App api={api} initialConversations={conversations} initialSummaries={summaries} models={models} modelConfiguration={modelConfiguration} />),
+    ...render(<App api={api} initialConversations={conversations} initialSummaries={summaries} models={models} modelConfiguration={modelConfiguration} onLock={vi.fn()} />),
   }
 }
 
