@@ -3,7 +3,7 @@ import './PrivacyGate.css'
 
 const PRIVACY_PIN_KEY = 'private-chat.privacy-pin.v1'
 const IDLE_TIMEOUT_MS = 5 * 60 * 1000
-const AWAY_TIMEOUT_MS = 15 * 1000
+const AWAY_TIMEOUT_MS = 3 * 60 * 1000
 const PBKDF2_ITERATIONS = 200_000
 
 interface PrivacyPinRecord {
@@ -161,7 +161,6 @@ export function PrivacyGate({ children }: PrivacyGateProps) {
           {error ? <p className="privacy-error" role="alert">{error}</p> : null}
           <button type="submit" disabled={isSubmitting || !pin || (isFirstUse && !confirmation)}>{isFirstUse ? 'Create privacy PIN' : 'Unlock'}</button>
         </form>
-        <p className="privacy-note">This is a privacy shield for casual viewing, not a replacement for Windows sign-in security.</p>
       </section>
     </main>
   )

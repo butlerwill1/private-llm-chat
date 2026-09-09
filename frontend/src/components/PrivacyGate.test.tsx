@@ -33,4 +33,9 @@ describe('PrivacyGate', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('not correct')
     expect(screen.queryByText('Private conversation')).not.toBeInTheDocument()
   })
+
+  it('does not display the former security disclaimer on the lock screen', () => {
+    render(<PrivacyGate>{() => <p>Private conversation</p>}</PrivacyGate>)
+    expect(screen.queryByText(/not a replacement for Windows sign-in security/)).not.toBeInTheDocument()
+  })
 })

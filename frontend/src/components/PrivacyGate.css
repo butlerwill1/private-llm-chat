@@ -11,8 +11,6 @@
 .privacy-card button { min-height: 44px; margin-top: 9px; border: 1px solid #53c78b; border-radius: 6px; color: #092014; background: #53c78b; font-weight: 700; cursor: pointer; }
 .privacy-card button:disabled { cursor: not-allowed; opacity: 0.6; }
 .privacy-error { margin: 2px 0 0; color: #ffaaaa; font-size: 14px; }
-.privacy-note { margin: 22px 0 0; color: #a5aea9; font-size: 12px; line-height: 1.5; }
-
 @media (max-width: 900px) {
   .privacy-lock-button { top: 12px; right: 16px; padding: 7px 9px; font-size: 13px; }
 }
