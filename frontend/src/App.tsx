@@ -32,6 +32,7 @@ export function App({ api, initialConversations, initialSummaries, models, model
   const selectConversation = async (id: string) => {
     if (id === selectedId) return
     setSelectedId(id)
+    setView('chat')
     setSidebarOpen(false)
     setIsLoadingConversation(true)
     setError(null)

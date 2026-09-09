@@ -119,6 +119,16 @@ describe('Private Chat', () => {
     expect(screen.getByText('No local model is currently loaded.')).toBeVisible()
   })
 
+  it('returns to a conversation after opening the system monitor', async () => {
+    const { user } = await renderApp()
+    await user.click(screen.getByRole('button', { name: 'System Monitor' }))
+    expect(await screen.findByRole('heading', { name: 'System Monitor' })).toBeVisible()
+
+    await user.click(screen.getByRole('button', { name: 'Project decisions' }))
+    expect(await screen.findByRole('heading', { name: 'Project decisions' })).toBeVisible()
+    expect(screen.queryByRole('heading', { name: 'System Monitor' })).not.toBeInTheDocument()
+  })
+
   it('deletes the selected conversation after confirmation', async () => {
     // Stub only the browser confirmation boundary; deletion itself still travels
     // through ChatApi and must remove the selected transcript from rendered state.
