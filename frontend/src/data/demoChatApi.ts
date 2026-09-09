@@ -1,4 +1,4 @@
-import type { ChatApi, Conversation, ConversationSummary, ModelConfiguration, ModelOption, SendMessageRequest } from '../domain/chat'
+import type { ChatApi, Conversation, ConversationSummary, ModelConfiguration, ModelOption, SendMessageRequest, SystemMonitor } from '../domain/chat'
 
 const starterConversations: readonly Conversation[] = [
   {
@@ -131,4 +131,7 @@ export class DemoChatApi implements ChatApi {
     this.conversations = this.conversations.filter(({ id }) => id !== conversationId)
     return Promise.resolve()
   }
+
+  getSystemMonitor(): Promise<SystemMonitor> { return Promise.resolve({ snapshot: { sampledAt: new Date().toISOString(), gpuName: { value: 'Demo GPU', unit: null, status: 'ok', detail: null }, gpuTemperature: { value: 54, unit: '°C', status: 'ok', detail: null }, gpuUtilization: { value: 18, unit: '%', status: 'ok', detail: null }, gpuPower: { value: 42, unit: 'W', status: 'ok', detail: null }, vramTotal: { value: 8151 * 1024 * 1024, unit: 'bytes', status: 'ok', detail: null }, vramUsed: { value: 3100 * 1024 * 1024, unit: 'bytes', status: 'ok', detail: null }, vramFree: { value: 5051 * 1024 * 1024, unit: 'bytes', status: 'ok', detail: null }, diskFree: { value: 300 * 1024 ** 3, unit: 'bytes', status: 'ok', detail: null }, diskTotal: { value: 900 * 1024 ** 3, unit: 'bytes', status: 'ok', detail: null }, ollamaStatus: { value: 'reachable', unit: null, status: 'ok', detail: null }, cpuTemperature: { value: null, unit: null, status: 'unavailable', detail: 'Install Libre Hardware Monitor for CPU temperature.' }, loadedModels: [] }, telemetry: { sampleCount: 12, databaseBytes: 4096 } }) }
+  async exportSystemMonitor(): Promise<void> { return Promise.resolve() }
 }

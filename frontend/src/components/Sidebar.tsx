@@ -1,5 +1,5 @@
 import type { ConversationSummary } from '../domain/chat'
-import { LockIcon, MenuIcon, MessageIcon, PlusCircleIcon, SettingsIcon } from './Icons'
+import { LockIcon, MenuIcon, MessageIcon, MonitorIcon, PlusCircleIcon, SettingsIcon } from './Icons'
 
 interface SidebarProps {
   readonly conversations: readonly ConversationSummary[]
@@ -9,9 +9,10 @@ interface SidebarProps {
   readonly onNewConversation: () => void
   readonly onSelectConversation: (id: string) => void
   readonly onSettings: () => void
+  readonly onMonitor: () => void
 }
 
-export function Sidebar({ conversations, selectedId, isOpen, onToggle, onNewConversation, onSelectConversation, onSettings }: SidebarProps) {
+export function Sidebar({ conversations, selectedId, isOpen, onToggle, onNewConversation, onSelectConversation, onSettings, onMonitor }: SidebarProps) {
   return (
     <aside className={isOpen ? 'sidebar sidebar--open' : 'sidebar'} aria-label="Chat navigation">
       <div className="brand-row">
@@ -45,6 +46,10 @@ export function Sidebar({ conversations, selectedId, isOpen, onToggle, onNewConv
           </ul>
         </nav>
         <div className="sidebar-divider" />
+        <button className="settings-button" type="button" onClick={onMonitor}>
+          <MonitorIcon />
+          System Monitor
+        </button>
         <button className="settings-button" type="button" onClick={onSettings}>
           <SettingsIcon />
           Settings

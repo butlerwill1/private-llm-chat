@@ -1,9 +1,11 @@
+from time import perf_counter
 from typing import Annotated, cast
 from uuid import UUID
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 
+from private_chat.adapters.telemetry import LocalSystemMonitor, TelemetryStore
 from private_chat.api.schemas import (
     ChangeModelRequest,
     ConversationResponse,
@@ -14,6 +16,8 @@ from private_chat.api.schemas import (
     ModelOptionResponse,
     RenameConversationRequest,
     SendMessageRequest,
+    SystemMonitorResponse,
+    TelemetryStatusResponse,
 )
 from private_chat.application.conversations import ConversationService
 from private_chat.application.model_router import ConfiguredModelCatalog, ModelOption
@@ -51,9 +55,44 @@ def get_storage_label(request: Request) -> str:
     return cast(str, request.app.state.storage_label)
 
 
+def get_system_monitor(request: Request) -> LocalSystemMonitor:
+    return cast(LocalSystemMonitor, request.app.state.system_monitor)
+
+
+def get_telemetry_store(request: Request) -> TelemetryStore:
+    return cast(TelemetryStore, request.app.state.telemetry_store)
+
+
 @router.get("/health", response_model=HealthResponse)
 async def health() -> HealthResponse:
     return HealthResponse(status="ok")
+
+
+@router.get("/system-monitor", response_model=SystemMonitorResponse)
+async def system_monitor(
+    monitor: Annotated[LocalSystemMonitor, Depends(get_system_monitor)],
+    store: Annotated[TelemetryStore, Depends(get_telemetry_store)],
+) -> SystemMonitorResponse:
+    """Return operational local hardware data only; never transcript data."""
+    snapshot = await monitor.snapshot()
+    count, database_bytes = store.status()
+    return SystemMonitorResponse(
+        snapshot=snapshot,
+        telemetry=TelemetryStatusResponse(sample_count=count, database_bytes=database_bytes),
+    )
+
+
+@router.get("/system-monitor/export")
+async def export_system_monitor(
+    store: Annotated[TelemetryStore, Depends(get_telemetry_store)],
+) -> Response:
+    return Response(
+        store.export_json(),
+        media_type="application/json",
+        headers={
+            "Content-Disposition": "attachment; filename=private-chat-performance-telemetry.json"
+        },
+    )
 
 
 @router.get("/models", response_model=tuple[ModelOptionResponse, ...])
@@ -201,9 +240,11 @@ async def send_message(
     use_case: Annotated[SendMessage, Depends(get_send_message)],
     service: Annotated[ConversationService, Depends(get_conversations)],
     catalog: Annotated[ConfiguredModelCatalog, Depends(get_model_catalog)],
+    telemetry: Annotated[TelemetryStore, Depends(get_telemetry_store)],
 ) -> ConversationResponse:
     # Never log `body`: it contains plaintext user content.
     try:
+        started_at = perf_counter()
         await use_case.execute(
             SendMessageCommand(
                 conversation_id=conversation_id,
@@ -229,4 +270,24 @@ async def send_message(
     view = await service.get(conversation_id)
     if view is None:
         raise RuntimeError("Conversation disappeared after a completed turn")
-    return ConversationResponse.from_view(view, catalog)
+    response = ConversationResponse.from_view(view, catalog)
+    assistant = next(
+        (message for message in reversed(response.messages) if message.role.value == "assistant"),
+        None,
+    )
+    if (
+        assistant is not None
+        and assistant.usage is not None
+        and assistant.usage.provider == "self-hosted"
+    ):
+        telemetry.record_inference(
+            {
+                "model": assistant.usage.model,
+                "duration_ms": round((perf_counter() - started_at) * 1000),
+                "input_tokens": assistant.usage.input_tokens,
+                "output_tokens": assistant.usage.output_tokens,
+                "total_tokens": assistant.usage.total_tokens,
+                "outcome": "success",
+            }
+        )
+    return response

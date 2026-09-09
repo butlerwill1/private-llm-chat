@@ -3,6 +3,7 @@ import { Composer } from './components/Composer'
 import { ConversationHeader } from './components/ConversationHeader'
 import { MessageList } from './components/MessageList'
 import { Sidebar } from './components/Sidebar'
+import { SystemMonitor } from './components/SystemMonitor'
 import type { ChatApi, Conversation, ConversationSummary, ModelConfiguration, ModelOption } from './domain/chat'
 
 interface AppProps {
@@ -25,6 +26,7 @@ export function App({ api, initialConversations, initialSummaries, models, model
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [selectedModelId, setSelectedModelId] = useState(models[0]?.id ?? '')
   const [error, setError] = useState<string | null>(null)
+  const [view, setView] = useState<'chat' | 'monitor'>('chat')
   const selectedConversation = conversations.find(({ id }) => id === selectedId)
 
   const selectConversation = async (id: string) => {
@@ -133,7 +135,7 @@ export function App({ api, initialConversations, initialSummaries, models, model
     }
   }
 
-  if (!selectedConversation && !isLoadingConversation) {
+  if (!selectedConversation && !isLoadingConversation && view === 'chat') {
     return (
       <main className="empty-app">
         <p>No conversations are available.</p>
@@ -142,6 +144,7 @@ export function App({ api, initialConversations, initialSummaries, models, model
           {models.map((model) => <option key={model.id} value={model.id}>{model.label}</option>)}
         </select>
         <button type="button" onClick={() => void createConversation()}>Start a conversation</button>
+        <button type="button" onClick={() => setView('monitor')}>Open System Monitor</button>
         {error ? <p className="request-error" role="alert">{error}</p> : null}
       </main>
     )
@@ -158,8 +161,9 @@ export function App({ api, initialConversations, initialSummaries, models, model
         onNewConversation={() => void createConversation()}
         onSelectConversation={(id) => void selectConversation(id)}
         onSettings={() => setSettingsOpen(true)}
+        onMonitor={() => { setView('monitor'); setSidebarOpen(false) }}
       />
-      <main className="chat-main">
+      {view === 'monitor' ? <SystemMonitor api={api} /> : <main className="chat-main">
         <ConversationHeader
           key={selectedConversation?.id}
           title={selectedConversation?.title ?? 'Loading conversation'}
@@ -174,7 +178,7 @@ export function App({ api, initialConversations, initialSummaries, models, model
         {isSending ? <p className="response-pending" role="status">The selected model is generating a response…</p> : null}
         {error ? <p className="request-error" role="alert">{error}</p> : null}
         <Composer disabled={isSending} onSend={sendMessage} />
-      </main>
+      </main>}
       {settingsOpen ? (
         <div className="settings-backdrop" role="presentation" onClick={() => setSettingsOpen(false)}>
           <section className="settings-panel" role="dialog" aria-modal="true" aria-labelledby="settings-title" onClick={(event) => event.stopPropagation()}>

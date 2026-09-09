@@ -56,6 +56,15 @@ export interface SendMessageRequest {
 
 export interface CreateConversationRequest { readonly modelId: string }
 
+export interface Metric { readonly value: number | string | null; readonly unit: string | null; readonly status: string; readonly detail: string | null }
+export interface LoadedModel { readonly name: string; readonly vramBytes: number | null; readonly contextLength: number | null; readonly expiresAt: string | null }
+export interface SystemMonitorSnapshot {
+  readonly sampledAt: string; readonly gpuName: Metric; readonly gpuTemperature: Metric; readonly gpuUtilization: Metric; readonly gpuPower: Metric
+  readonly vramTotal: Metric; readonly vramUsed: Metric; readonly vramFree: Metric; readonly diskFree: Metric; readonly diskTotal: Metric
+  readonly ollamaStatus: Metric; readonly cpuTemperature: Metric; readonly loadedModels: readonly LoadedModel[]
+}
+export interface SystemMonitor { readonly snapshot: SystemMonitorSnapshot; readonly telemetry: { readonly sampleCount: number; readonly databaseBytes: number } }
+
 export interface ChatApi {
   listConversations(): Promise<readonly Conversation[]>
   listConversationSummaries(): Promise<readonly ConversationSummary[]>
@@ -67,4 +76,6 @@ export interface ChatApi {
   changeModel(conversationId: string, modelId: string): Promise<Conversation>
   sendMessage(request: SendMessageRequest): Promise<Conversation>
   deleteConversation(conversationId: string): Promise<void>
+  getSystemMonitor(): Promise<SystemMonitor>
+  exportSystemMonitor(): Promise<void>
 }

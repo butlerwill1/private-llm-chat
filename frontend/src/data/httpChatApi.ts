@@ -1,4 +1,4 @@
-import type { ChatApi, ChatMessage, Conversation, ConversationSummary, CostBasis, ModelConfiguration, ModelOption, SendMessageRequest } from '../domain/chat'
+import type { ChatApi, ChatMessage, Conversation, ConversationSummary, CostBasis, ModelConfiguration, ModelOption, SendMessageRequest, SystemMonitor } from '../domain/chat'
 
 interface ApiMessage {
   readonly id: string
@@ -221,5 +221,37 @@ export class HttpChatApi implements ChatApi {
     if (!response.ok) {
       await readJson(response)
     }
+  }
+
+  async getSystemMonitor(): Promise<SystemMonitor> {
+    const value = await readJson(await fetch(`${this.baseUrl}/system-monitor`))
+    if (!isRecord(value) || !isRecord(value.snapshot) || !isRecord(value.telemetry)
+      || typeof value.snapshot.sampled_at !== 'string' || !Array.isArray(value.snapshot.loaded_models)
+      || typeof value.telemetry.sample_count !== 'number' || typeof value.telemetry.database_bytes !== 'number') {
+      throw new Error('The system monitor returned invalid telemetry.')
+    }
+    const snapshot: Record<string, unknown> = value.snapshot
+    const metric = (name: string) => {
+      const item: unknown = snapshot[name]
+      if (!isRecord(item) || !('value' in item) || !(typeof item.unit === 'string' || item.unit === null)
+        || typeof item.status !== 'string' || !(typeof item.detail === 'string' || item.detail === null)) throw new Error('The system monitor returned invalid metrics.')
+      return { value: typeof item.value === 'number' || typeof item.value === 'string' ? item.value : null, unit: item.unit, status: item.status, detail: item.detail }
+    }
+    return { snapshot: {
+      sampledAt: value.snapshot.sampled_at, gpuName: metric('gpu_name'), gpuTemperature: metric('gpu_temperature'), gpuUtilization: metric('gpu_utilization'), gpuPower: metric('gpu_power'),
+      vramTotal: metric('vram_total'), vramUsed: metric('vram_used'), vramFree: metric('vram_free'), diskFree: metric('disk_free'), diskTotal: metric('disk_total'),
+      ollamaStatus: metric('ollama_status'), cpuTemperature: metric('cpu_temperature'),
+      loadedModels: value.snapshot.loaded_models.map((item) => {
+        if (!isRecord(item) || typeof item.name !== 'string') throw new Error('The system monitor returned invalid models.')
+        return { name: item.name, vramBytes: typeof item.vram_bytes === 'number' ? item.vram_bytes : null, contextLength: typeof item.context_length === 'number' ? item.context_length : null, expiresAt: typeof item.expires_at === 'string' ? item.expires_at : null }
+      }),
+    }, telemetry: { sampleCount: value.telemetry.sample_count, databaseBytes: value.telemetry.database_bytes } }
+  }
+
+  async exportSystemMonitor(): Promise<void> {
+    const response = await fetch(`${this.baseUrl}/system-monitor/export`)
+    if (!response.ok) await readJson(response)
+    const blob = await response.blob(); const url = URL.createObjectURL(blob); const link = document.createElement('a')
+    link.href = url; link.download = 'private-chat-performance-telemetry.json'; link.click(); URL.revokeObjectURL(url)
   }
 }

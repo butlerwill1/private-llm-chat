@@ -282,6 +282,11 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the working agreement.
 - AWS Terraform and S3/KMS adapters are retained as optional infrastructure. Normal local operation does not contact AWS; an old local Terraform state must be refreshed before a future apply.
 - The GPU AMI factory and runtime session flow are implemented, but model choice and licence acceptance, trusted artefact checksums, GPU quotas and regional availability remain deployment-specific decisions.
 - Responses are not token-streamed. Long local generations display an in-progress state and have a bounded backend timeout.
-- GPU temperature, utilisation and VRAM usage are available through administrative commands such as `nvidia-smi`, not through the browser settings panel.
+- GPU temperature, utilisation and VRAM usage are available in the local System Monitor;
+  `nvidia-smi` remains useful for independent command-line diagnosis.
+- The local **System Monitor** records privacy-safe performance telemetry only while the
+  backend runs. It never records prompts, responses, transcript IDs or titles. Run
+  `./scripts/setup-local-ollama.ps1` to install/verify Ollama and pull the supported
+  `gemma3:4b` laptop model, then set `CHAT_ENABLE_LOCAL_OLLAMA=true` in `backend/.env`.
 - The local frontend uses the FastAPI conversation API; authentication is still required before exposing that API beyond the user's computer.
 - This application is not a substitute for professional, medical, legal, financial or emergency support.

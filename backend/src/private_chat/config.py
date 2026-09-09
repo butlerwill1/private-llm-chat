@@ -149,6 +149,12 @@ class Settings(BaseSettings):
     aws_region: str = "eu-west-2"
     self_hosted_base_url: str = "http://127.0.0.1:11434/v1"
     self_hosted_api_key: SecretStr | None = None
+    enable_local_ollama: bool = False
+    local_ollama_model_name: str = "gemma3:4b"
+    local_ollama_model_store: Path | None = None
+    telemetry_enabled: bool = True
+    telemetry_sample_seconds: int = Field(default=5, ge=1, le=60)
+    cpu_sensor_url: str = "http://127.0.0.1:8085/data.json"
     model_response_timeout_seconds: int = Field(default=300, ge=1, le=900)
     openrouter_api_key: SecretStr | None = None
     enable_openrouter: bool = True
@@ -224,3 +230,11 @@ class Settings(BaseSettings):
                 "LOCALAPPDATA is required for the default local transcript directory"
             )
         return Path(local_app_data) / "PrivateLLMChat"
+
+    def resolved_ollama_model_store(self) -> Path:
+        if self.local_ollama_model_store is not None:
+            return self.local_ollama_model_store
+        user_profile = os.environ.get("USERPROFILE")
+        if not user_profile:
+            return Path("C:/")
+        return Path(user_profile) / ".ollama" / "models"

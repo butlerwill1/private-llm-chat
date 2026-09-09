@@ -10,6 +10,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from private_chat.adapters.telemetry import SystemMonitorSnapshot
 from private_chat.application.conversations import ConversationView
 from private_chat.application.model_router import ConfiguredModelCatalog
 from private_chat.domain.models import ChatMessage, Conversation, CostBasis, Role, TurnUsage
@@ -165,3 +166,13 @@ class HealthResponse(BaseModel):
     """Small response used by health checks without touching conversation data."""
 
     status: str
+
+
+class TelemetryStatusResponse(BaseModel):
+    sample_count: int
+    database_bytes: int
+
+
+class SystemMonitorResponse(BaseModel):
+    snapshot: SystemMonitorSnapshot
+    telemetry: TelemetryStatusResponse

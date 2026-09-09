@@ -111,6 +111,14 @@ describe('Private Chat', () => {
     expect(screen.queryByRole('dialog', { name: 'Session settings' })).not.toBeInTheDocument()
   })
 
+  it('opens the local system monitor without showing conversation content', async () => {
+    const { user } = await renderApp()
+    await user.click(screen.getByRole('button', { name: 'System Monitor' }))
+    expect(await screen.findByRole('heading', { name: 'System Monitor' })).toBeVisible()
+    expect(screen.getByText('Demo GPU')).toBeVisible()
+    expect(screen.getByText('No local model is currently loaded.')).toBeVisible()
+  })
+
   it('deletes the selected conversation after confirmation', async () => {
     // Stub only the browser confirmation boundary; deletion itself still travels
     // through ChatApi and must remove the selected transcript from rendered state.

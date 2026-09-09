@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -14,6 +15,7 @@ from private_chat.adapters.openrouter import OpenRouterConfiguration, OpenRouter
 from private_chat.adapters.s3_repository import S3ConversationRepository
 from private_chat.adapters.self_hosted import SelfHostedConfiguration, SelfHostedModelClient
 from private_chat.adapters.sqlite_repository import SqliteConversationRepository
+from private_chat.adapters.telemetry import LocalSystemMonitor, TelemetryStore
 from private_chat.adapters.windows_dpapi import DpapiLocalDataKeyProvider
 from private_chat.api.routes import router
 from private_chat.application.conversations import ConversationService
@@ -25,6 +27,8 @@ from private_chat.ports.interfaces import (
     DataKeyProvider,
     ModelClient,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def create_app(
@@ -64,8 +68,28 @@ def create_app(
                         for model_id, client in openrouter_clients.items()
                     )
                 )
+            collector: asyncio.Task[None] | None = None
+            if settings.telemetry_enabled:
+
+                async def collect() -> None:
+                    while True:
+                        try:
+                            telemetry_store.append(await system_monitor.snapshot())
+                        except Exception:  # A monitor must never take chat down.
+                            logger.warning(
+                                "Local performance telemetry sample failed", exc_info=True
+                            )
+                        await asyncio.sleep(settings.telemetry_sample_seconds)
+
+                collector = asyncio.create_task(collect())
             yield
         finally:
+            if "collector" in locals() and collector is not None:
+                collector.cancel()
+                try:
+                    await collector
+                except asyncio.CancelledError:
+                    pass
             if owned_client is not None:
                 await owned_client.aclose()
 
@@ -83,8 +107,13 @@ def create_app(
         if client is None:  # Defensive invariant for future composition changes.
             raise RuntimeError("HTTP client was not configured")
         configured_clients: dict[str, ModelClient] = {}
-        if settings.model_backend is ModelBackend.SELF_HOSTED:
-            configured_clients[settings.model_name] = SelfHostedModelClient(
+        if settings.model_backend is ModelBackend.SELF_HOSTED or settings.enable_local_ollama:
+            local_model = (
+                settings.model_name
+                if settings.model_backend is ModelBackend.SELF_HOSTED
+                else settings.local_ollama_model_name
+            )
+            configured_clients[local_model] = SelfHostedModelClient(
                 SelfHostedConfiguration(
                     base_url=settings.self_hosted_base_url,
                     api_key=settings.self_hosted_api_key,
@@ -114,8 +143,16 @@ def create_app(
             allow_custom_openrouter_model=settings.allow_custom_openrouter_model,
         )
         model_options = tuple(
-            [ModelOption(settings.model_name, "Private GPU (Ollama)", "self_hosted")]
-            if settings.model_backend is ModelBackend.SELF_HOSTED
+            [
+                ModelOption(
+                    settings.model_name
+                    if settings.model_backend is ModelBackend.SELF_HOSTED
+                    else settings.local_ollama_model_name,
+                    "Local GPU (Ollama)",
+                    "self_hosted",
+                )
+            ]
+            if settings.model_backend is ModelBackend.SELF_HOSTED or settings.enable_local_ollama
             else []
         ) + tuple(
             ModelOption(route.model_id, route.label, "openrouter", route.provider)
@@ -174,5 +211,14 @@ def create_app(
         if settings.storage_backend is StorageBackend.S3
         else "Encrypted in-memory session"
     )
+    data_directory = settings.resolved_local_data_dir()
+    system_monitor = LocalSystemMonitor(
+        settings.self_hosted_base_url,
+        settings.resolved_ollama_model_store(),
+        settings.cpu_sensor_url,
+    )
+    telemetry_store = TelemetryStore(data_directory / "performance-telemetry.sqlite3")
+    app.state.system_monitor = system_monitor
+    app.state.telemetry_store = telemetry_store
     app.include_router(router, prefix="/v1")
     return app
