@@ -10,6 +10,8 @@ from private_chat.ports.interfaces import (
     ConversationRepository,
     EnvelopeEncryptor,
     ModelClient,
+    StreamCallback,
+    generate_with_stream,
 )
 
 
@@ -17,6 +19,7 @@ from private_chat.ports.interfaces import (
 class SendMessageCommand:
     conversation_id: UUID
     content: str
+    prompt_mode_id: str | None = None
 
 
 class SendMessage:
@@ -35,8 +38,22 @@ class SendMessage:
         self._model_client = model_client
         self._default_model_id = default_model_id
         self._instructions_provider = instructions_provider
+        self._active: set[UUID] = set()
 
-    async def execute(self, command: SendMessageCommand) -> ChatMessage:
+    async def execute(
+        self, command: SendMessageCommand, emit: StreamCallback | None = None
+    ) -> ChatMessage:
+        if command.conversation_id in self._active:
+            raise ValueError("A response is already being generated for this conversation")
+        self._active.add(command.conversation_id)
+        try:
+            return await self._execute(command, emit)
+        finally:
+            self._active.discard(command.conversation_id)
+
+    async def _execute(
+        self, command: SendMessageCommand, emit: StreamCallback | None
+    ) -> ChatMessage:
         conversation = await self._repository.get_conversation(command.conversation_id)
         if conversation is None:
             raise KeyError("Conversation does not exist")
@@ -68,14 +85,16 @@ class SendMessage:
         instructions = (
             None
             if self._instructions_provider is None
-            else self._instructions_provider.instructions()
+            else self._instructions_provider.instructions(command.prompt_mode_id)
         )
         system = () if instructions is None else (ChatMessage.create(Role.SYSTEM, instructions),)
-        response = await self._model_client.generate(
-            ModelRequest(
+        request = ModelRequest(
                 messages=(*system, *history, user),
                 model=conversation.active_model_id or inferred_model or self._default_model_id,
-            )
+        )
+        response = (
+            await self._model_client.generate(request)
+            if emit is None else await generate_with_stream(self._model_client, request, emit)
         )
         usage = response.usage or TurnUsage.unavailable(
             model=response.model, provider=response.provider

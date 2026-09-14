@@ -6,8 +6,10 @@ from urllib.parse import urlparse
 import httpx
 from pydantic import BaseModel, ConfigDict, SecretStr, field_validator
 
+from private_chat.adapters.streaming import stream_completion
 from private_chat.adapters.usage import parse_self_hosted_usage
 from private_chat.domain.models import ModelRequest, ModelResponse
+from private_chat.ports.interfaces import StreamCallback
 
 
 class SelfHostedConfiguration(BaseModel):
@@ -68,4 +70,16 @@ class SelfHostedModelClient:
             model=model,
             provider="self-hosted",
             usage=parse_self_hosted_usage(body.get("usage"), model=model, provider="self-hosted"),
+        )
+
+    async def stream(self, request: ModelRequest, emit: StreamCallback) -> ModelResponse:
+        headers = {}
+        if self._config.api_key is not None:
+            headers["Authorization"] = f"Bearer {self._config.api_key.get_secret_value()}"
+        return await stream_completion(
+            self._client, f"{self._config.base_url}/chat/completions", headers,
+            {"model": request.model, "messages": [
+                {"role": message.role.value, "content": message.content}
+                for message in request.messages
+            ]}, emit, provider="self-hosted", parse_usage=parse_self_hosted_usage,
         )

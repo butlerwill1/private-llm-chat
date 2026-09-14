@@ -5,8 +5,8 @@ from these classes; it only needs to supply methods with compatible signatures.
 This keeps application services independent of OpenRouter, AWS and local test doubles.
 """
 
-from collections.abc import Sequence
-from typing import Protocol
+from collections.abc import Awaitable, Callable, Sequence
+from typing import Protocol, runtime_checkable
 from uuid import UUID
 
 from private_chat.domain.models import (
@@ -43,6 +43,24 @@ class ModelClient(Protocol):
         """Generate one normalised response from provider-neutral input."""
 
         ...
+
+
+StreamCallback = Callable[[str, str], Awaitable[None]]
+
+
+@runtime_checkable
+class StreamingModelClient(Protocol):
+    async def stream(self, request: ModelRequest, emit: StreamCallback) -> ModelResponse: ...
+
+
+async def generate_with_stream(
+    client: ModelClient, request: ModelRequest, emit: StreamCallback
+) -> ModelResponse:
+    if isinstance(client, StreamingModelClient):
+        return await client.stream(request, emit)
+    response = await client.generate(request)
+    await emit("text", response.content)
+    return response
 
 
 class ConversationRepository(Protocol):
@@ -128,7 +146,7 @@ class DataKeyProvider(Protocol):
 class ConversationInstructionsProvider(Protocol):
     """Supplies optional local instructions without exposing their storage."""
 
-    def instructions(self) -> str | None:
+    def instructions(self, mode_id: str | None = None) -> str | None:
         """Return non-empty instructions or ``None`` when not configured."""
 
         ...

@@ -4,7 +4,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 
 from private_chat.domain.models import ModelRequest, ModelResponse
-from private_chat.ports.interfaces import ModelClient
+from private_chat.ports.interfaces import ModelClient, StreamCallback, generate_with_stream
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,3 +65,11 @@ class ModelRouter:
                 return await self._custom_openrouter_client.generate(request)
             raise ValueError("The requested model is not enabled for this session") from error
         return await client.generate(request)
+
+    async def stream(self, request: ModelRequest, emit: StreamCallback) -> ModelResponse:
+        client = self._clients.get(request.model)
+        if client is None and self._allow_custom_openrouter_model:
+            client = self._custom_openrouter_client
+        if client is None:
+            raise ValueError("The requested model is not enabled for this session")
+        return await generate_with_stream(client, request, emit)

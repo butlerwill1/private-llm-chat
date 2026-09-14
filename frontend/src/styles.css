@@ -44,7 +44,18 @@ button:focus-visible, textarea:focus-visible, select:focus-visible, summary:focu
 .settings-button { display: flex; align-items: center; gap: 20px; width: 100%; padding: 17px 18px; border: 0; background: transparent; color: var(--ink); font-size: 20px; text-align: left; cursor: pointer; }
 .settings-button svg { width: 27px; height: 27px; }
 
-.chat-main { display: grid; grid-template-rows: 190px minmax(320px, 1fr) auto; min-height: 100vh; overflow: hidden; }
+.chat-main { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; height: 100dvh; min-height: 0; overflow: hidden; }
+.reading-pane { display: grid; grid-template-rows: minmax(0, 1fr) auto; min-height: 0; }
+.reading-viewport { min-height: 0; overflow-y: auto; overflow-anchor: none; overscroll-behavior: contain; }
+.reading-viewport .message-list { overflow: visible; content-visibility: visible; }
+.reading-spacer { height: calc(100% - 100px); min-height: 120px; pointer-events: none; }
+.stream-text { white-space: pre-wrap; overflow-wrap: anywhere; min-height: 1.65em; }
+.message-content { min-width: 0; flex: 1; }
+.stream-controls { display: flex; align-items: center; gap: 12px; height: 48px; padding: 4px 24px; border-top: 1px solid var(--line); font-size: 13px; overflow-x: auto; white-space: nowrap; }
+.stream-controls span { flex: 1; min-width: 90px; overflow: hidden; text-overflow: ellipsis; color: var(--muted); }
+.stream-controls button, .format-answer { padding: 5px 9px; border: 1px solid var(--line); border-radius: 5px; color: var(--green); background: var(--panel); cursor: pointer; font-size: 13px; }
+.chat-notice { height: 34px; overflow-y: auto; }
+.chat-notice .request-error { margin: 0 24px; font-size: 13px; }
 .conversation-header { display: flex; align-items: flex-start; justify-content: space-between; padding: 111px 51px 0 49px; }
 .conversation-title-area { display: flex; min-width: 0; align-items: baseline; gap: 14px; }
 .conversation-header h1 { margin: 0; font-family: Georgia, "Times New Roman", serif; font-size: 38px; font-weight: 400; line-height: 1.15; letter-spacing: -0.025em; }
@@ -55,8 +66,12 @@ button:focus-visible, textarea:focus-visible, select:focus-visible, summary:focu
 .conversation-title-form button { padding: 8px 11px; border: 1px solid var(--line); border-radius: 5px; color: var(--ink); background: var(--panel); cursor: pointer; }
 .conversation-title-form button[type="submit"] { border-color: var(--green); color: var(--green); }
 .conversation-title-form button:disabled, .edit-conversation-title:disabled { cursor: not-allowed; opacity: 0.45; }
-.conversation-actions { display: flex; align-items: center; gap: 24px; }
-.conversation-model { max-width: 240px; height: 36px; padding: 0 30px 0 10px; border: 1px solid var(--line); border-radius: 6px; color: var(--ink); background: var(--panel); }
+.conversation-actions { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 16px; }
+.conversation-header { flex-wrap: wrap; gap: 22px; }
+.prompt-mode-control { display: grid; gap: 6px; max-width: 240px; }
+.prompt-mode-control label { font-size: 13px; color: var(--muted); }
+.prompt-mode-control small { font-size: 11px; line-height: 1.4; color: var(--muted); }
+.conversation-model { max-width: min(400px, 100%); height: 36px; padding: 0 30px 0 10px; border: 1px solid var(--line); border-radius: 6px; color: var(--ink); background: var(--panel); }
 .delete-conversation { padding: 8px 0; border: 0; color: #ff9999; background: transparent; cursor: pointer; }
 .delete-conversation:hover { text-decoration: underline; }
 .privacy-details { position: relative; color: var(--green); }
@@ -123,6 +138,11 @@ button:focus-visible, textarea:focus-visible, select:focus-visible, summary:focu
 
 
 @media (max-width: 900px) {
+  .stream-controls { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: 28px 32px; gap: 4px 10px; height: 78px; padding: 6px 16px; overflow: hidden; }
+  .stream-controls span { grid-column: 1; grid-row: 1; min-width: 0; }
+  .stream-controls label { grid-column: 1; grid-row: 2; }
+  .stream-controls > button { grid-column: 2; grid-row: 2; }
+  .stream-controls > .stream-action { grid-row: 1; font-size: 12px; }
   .app-shell { display: block; }
   .sidebar { position: relative; z-index: 5; border-right: 0; }
   .brand-row { height: 68px; padding: 0 20px; border-bottom: 1px solid var(--line); font-size: 21px; }
@@ -134,7 +154,7 @@ button:focus-visible, textarea:focus-visible, select:focus-visible, summary:focu
   .new-conversation { height: 54px; font-size: 17px; }
   .nav-label { margin-top: 26px; font-size: 16px; }
   .conversation-link { min-height: 56px; font-size: 17px; }
-  .chat-main { grid-template-rows: auto minmax(300px, 1fr) auto; min-height: calc(100vh - 68px); }
+  .chat-main { grid-template-rows: auto minmax(0, 1fr) auto; height: calc(100dvh - 68px); min-height: 0; }
   .monitor-main { min-height: calc(100vh - 68px); padding: 26px 20px; }
   .conversation-header { align-items: center; padding: 28px 22px 18px; }
   .conversation-title-area { align-items: flex-start; flex-direction: column; gap: 5px; }

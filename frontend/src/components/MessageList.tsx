@@ -1,8 +1,11 @@
 import Markdown from 'react-markdown'
+import { useState } from 'react'
 import type { ChatMessage, TurnUsage } from '../domain/chat'
 
 interface MessageListProps {
   readonly messages: readonly ChatMessage[]
+  readonly plainIds?: ReadonlySet<string>
+  readonly draftId?: string | undefined
 }
 
 function formatTokenCount(tokens: number | null): string {
@@ -64,15 +67,18 @@ function UsageBreakdown({ usage }: { readonly usage: TurnUsage }) {
   )
 }
 
-export function MessageList({ messages }: MessageListProps) {
+export function MessageList({ messages, plainIds, draftId }: MessageListProps) {
+  const [formatted, setFormatted] = useState<ReadonlySet<string>>(() => new Set())
   return (
-    <ol className="message-list" aria-label="Conversation messages" aria-live="polite">
+    <ol className="message-list" aria-label="Conversation messages">
       {messages.map((message) => (
-        <li className={`message message--${message.author}`} key={message.id}>
+        <li className={`message message--${message.author}`} key={message.id} data-stream-answer={message.id === draftId ? '' : undefined}>
           {message.author === 'assistant' ? <div className="assistant-avatar" aria-hidden="true">AI</div> : null}
           <div className="message-content">
             {message.author === 'event' ? null : <strong>{message.author === 'assistant' ? 'Private Chat' : 'You'}</strong>}
-            {message.author === 'assistant' ? (
+            {message.author === 'assistant' && plainIds?.has(message.id) && !formatted.has(message.id) ? (
+              <><div className="stream-text">{message.body}</div>{message.id === draftId ? null : <button type="button" className="format-answer" onClick={() => setFormatted((current) => new Set([...current, message.id]))}>Format answer</button>}</>
+            ) : message.author === 'assistant' ? (
               <Markdown
                 components={{
                   a: ({ href, children }) => (
@@ -84,11 +90,11 @@ export function MessageList({ messages }: MessageListProps) {
               >
                 {message.body}
               </Markdown>
-            ) : <p>{message.body}</p>}
-            {message.author === 'event' ? null : <p className="message-usage" title={message.usage === null ? undefined : `${message.usage.model} via ${message.usage.provider}; cost is shared with the paired message.`}>
+            ) : <p className={plainIds?.has(message.id) ? 'stream-text' : undefined}>{message.body}</p>}
+            {message.author === 'event' || message.id === draftId || (message.author === 'user' && plainIds?.has(message.id)) ? null : <p className="message-usage" title={message.usage === null ? undefined : `${message.usage.model} via ${message.usage.provider}; cost is shared with the paired message.`}>
               {usageText(message.author, message.usage)}
             </p>}
-            {message.author === 'event' || message.usage === null ? null : <UsageBreakdown usage={message.usage} />}
+            {message.author === 'event' || message.usage === null || (message.author === 'user' && plainIds?.has(message.id)) ? null : <UsageBreakdown usage={message.usage} />}
           </div>
         </li>
       ))}

@@ -4,9 +4,10 @@ from typing import Any
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
 
+from private_chat.adapters.streaming import stream_completion
 from private_chat.adapters.usage import parse_generation_usage, parse_openrouter_usage
 from private_chat.domain.models import ModelRequest, ModelResponse
-from private_chat.ports.interfaces import ModelProviderError
+from private_chat.ports.interfaces import ModelProviderError, StreamCallback
 
 
 class OpenRouterConfiguration(BaseModel):
@@ -125,4 +126,26 @@ class OpenRouterModelClient:
         raise RuntimeError(
             "No configured OpenRouter provider currently offers a verified ZDR route for "
             + model_id
+        )
+
+    async def stream(self, request: ModelRequest, emit: StreamCallback) -> ModelResponse:
+        return await stream_completion(
+            self._client, f"{self._config.base_url}/chat/completions",
+            {"Authorization": f"Bearer {self._config.api_key.get_secret_value()}"},
+            {
+                "model": request.model,
+                "messages": [
+                    {"role": message.role.value, "content": message.content}
+                    for message in request.messages
+                ],
+                "provider": {
+                    "order": list(self._config.allowed_providers),
+                    "only": list(self._config.allowed_providers),
+                    "allow_fallbacks": False, "data_collection": "deny", "zdr": True,
+                },
+                "max_tokens": self._config.max_output_tokens,
+            }, emit, provider="openrouter", parse_usage=parse_openrouter_usage,
+            allowed_provider_names=(
+                self._config.allowed_provider_names or self._config.allowed_providers
+            ),
         )

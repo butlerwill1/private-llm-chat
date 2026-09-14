@@ -28,6 +28,23 @@ class LocalKeyMode(StrEnum):
     ENVIRONMENT = "environment"
 
 
+class LocalOllamaRoute(BaseModel):
+    """An approved installed Ollama tag and its human-readable UI label."""
+
+    model_config = {"frozen": True, "extra": "forbid"}
+    model_id: str = Field(min_length=1)
+    label: str = Field(min_length=1)
+
+
+DEFAULT_LOCAL_OLLAMA_ROUTES: tuple[LocalOllamaRoute, ...] = (
+    LocalOllamaRoute(model_id="gemma3:4b", label="Gemma 3 4B — Local GPU (auto)"),
+    LocalOllamaRoute(
+        model_id="qwen3.5:9b-laptop", label="Qwen 3.5 9B — Local GPU (auto)"
+    ),
+    LocalOllamaRoute(model_id="qwen3.6:27b-cpu", label="Qwen 3.6 27B — Local CPU"),
+)
+
+
 class OpenRouterRoute(BaseModel):
     """One immutable model/provider boundary for a privacy-restricted request."""
 
@@ -151,6 +168,7 @@ class Settings(BaseSettings):
     self_hosted_api_key: SecretStr | None = None
     enable_local_ollama: bool = False
     local_ollama_model_name: str = "gemma3:4b"
+    local_ollama_routes: tuple[LocalOllamaRoute, ...] = DEFAULT_LOCAL_OLLAMA_ROUTES
     local_ollama_model_store: Path | None = None
     telemetry_enabled: bool = True
     telemetry_sample_seconds: int = Field(default=5, ge=1, le=60)
@@ -163,6 +181,7 @@ class Settings(BaseSettings):
     openrouter_max_output_tokens: int = Field(default=4096, ge=1, le=4096)
     allow_custom_openrouter_model: bool = False
     instructions_file: Path | None = PROJECT_ROOT / ".local" / "conversation-instructions.md"
+    prompt_modes_dir: Path | None = PROJECT_ROOT / ".local" / "prompt-modes"
 
     @field_validator("local_master_key_b64")
     @classmethod
@@ -186,6 +205,15 @@ class Settings(BaseSettings):
             raise ValueError("At least one OpenRouter route is required")
         if len({route.model_id for route in value}) != len(value):
             raise ValueError("OpenRouter route model IDs must be unique")
+        return value
+
+    @field_validator("local_ollama_routes")
+    @classmethod
+    def require_unique_local_routes(
+        cls, value: tuple[LocalOllamaRoute, ...]
+    ) -> tuple[LocalOllamaRoute, ...]:
+        if len({route.model_id for route in value}) != len(value):
+            raise ValueError("Local Ollama route model IDs must be unique")
         return value
 
     @model_validator(mode="after")

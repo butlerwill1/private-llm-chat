@@ -1,9 +1,12 @@
-import { startTransition, useState } from 'react'
+import { startTransition, useEffect, useRef, useState } from 'react'
 import { Composer } from './components/Composer'
 import { ConversationHeader } from './components/ConversationHeader'
-import { MessageList } from './components/MessageList'
+import { ReadingPane, type LiveTurn } from './components/ReadingPane'
 import { Sidebar } from './components/Sidebar'
 import { SystemMonitor } from './components/SystemMonitor'
+import { PromptModeSelector } from './components/PromptModeSelector'
+import { readPromptMode } from './data/promptSelection'
+import { standardPromptModes } from './domain/chat'
 import type { ChatApi, Conversation, ConversationSummary, ModelConfiguration, ModelOption } from './domain/chat'
 
 interface AppProps {
@@ -21,16 +24,26 @@ export function App({ api, initialConversations, initialSummaries, models, model
   const [selectedId, setSelectedId] = useState(initialSummaries[0]?.id ?? '')
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [isSending, setIsSending] = useState(false)
+  const [live, setLive] = useState<LiveTurn | null>(null)
+  const [plainIds, setPlainIds] = useState<ReadonlySet<string>>(() => new Set())
+  const controller = useRef<AbortController | null>(null)
+  useEffect(() => () => controller.current?.abort(), [])
   const [isRenaming, setIsRenaming] = useState(false)
   const [isLoadingConversation, setIsLoadingConversation] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [selectedModelId, setSelectedModelId] = useState(models[0]?.id ?? '')
   const [error, setError] = useState<string | null>(null)
   const [view, setView] = useState<'chat' | 'monitor'>('chat')
+  const [promptSelections, setPromptSelections] = useState<Record<string, string>>({})
+  const promptModes = modelConfiguration.promptModes ?? standardPromptModes
+  const promptModeId = promptSelections[selectedId] ?? readPromptMode(selectedId)
+  const promptModeAvailable = promptModes.some((mode) => mode.id === promptModeId)
   const selectedConversation = conversations.find(({ id }) => id === selectedId)
 
   const selectConversation = async (id: string) => {
-    if (id === selectedId) return
+    setView('chat')
+    if (isSending || id === selectedId) return
+    setLive(null)
     setSelectedId(id)
     setView('chat')
     setSidebarOpen(false)
@@ -50,6 +63,8 @@ export function App({ api, initialConversations, initialSummaries, models, model
   }
 
   const createConversation = async () => {
+    if (isSending) return
+    setLive(null)
     setError(null)
     try {
       const conversation = await api.createConversation({ modelId: selectedModelId })
@@ -65,25 +80,49 @@ export function App({ api, initialConversations, initialSummaries, models, model
   }
 
   const sendMessage = async (body: string) => {
-    if (!selectedConversation) return
+    if (!selectedConversation || controller.current || live) return
+    const abort = new AbortController()
+    controller.current = abort
     setIsSending(true)
     setError(null)
+    let buffered = ''
+    let frame: number | null = null
+    const flush = () => {
+      const text = buffered
+      buffered = ''
+      frame = null
+      if (text) setLive((current) => current ? { ...current, answer: current.answer + text, status: 'Generating…' } : current)
+    }
     try {
-      const updated = await api.sendMessage({ conversationId: selectedConversation.id, body })
-      startTransition(() => {
-        setConversations((current) => current.map((conversation) =>
-          conversation.id === updated.id ? updated : conversation,
-        ))
-      })
+      const request = { conversationId: selectedConversation.id, body, promptModeId }
+      if (api.streamMessage) setLive({ id: crypto.randomUUID(), conversationId: selectedConversation.id, user: body, answer: '', status: 'Waiting for the model…', phase: 'generating' })
+      const updated = api.streamMessage
+        ? await api.streamMessage(request, abort.signal, (event) => {
+          if (event.type === 'text') {
+            buffered += event.text
+            if (frame === null) frame = requestAnimationFrame(flush)
+          } else setLive((current) => current ? { ...current, status: event.text } : current)
+        })
+        : await api.sendMessage(request)
+      if (frame !== null) cancelAnimationFrame(frame)
+      flush()
+      setPlainIds((current) => new Set([...current, ...updated.messages.slice(-2).map((message) => message.id)]))
+      setConversations((current) => current.map((conversation) => conversation.id === updated.id ? updated : conversation))
+      setLive(null)
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'The message could not be sent.')
+      if (frame !== null) cancelAnimationFrame(frame)
+      flush()
+      const status = abort.signal.aborted ? 'Stopped — unsaved draft' : 'Interrupted — unsaved draft'
+      setLive((current) => current ? { ...current, status, phase: 'interrupted' } : current)
+      if (!abort.signal.aborted) setError(caught instanceof Error ? caught.message : 'The message could not be sent.')
     } finally {
+      controller.current = null
       setIsSending(false)
     }
   }
 
   const changeModel = async (modelId: string) => {
-    if (!selectedConversation || modelId === selectedConversation.activeModelId) return
+    if (isSending || !selectedConversation || modelId === selectedConversation.activeModelId) return
     setIsSending(true)
     setError(null)
     try {
@@ -119,7 +158,7 @@ export function App({ api, initialConversations, initialSummaries, models, model
   }
 
   const deleteConversation = async () => {
-    if (!selectedConversation
+    if (isSending || !selectedConversation
       || !window.confirm('Delete this conversation and its encrypted transcript?')) return
     setError(null)
     try {
@@ -166,7 +205,7 @@ export function App({ api, initialConversations, initialSummaries, models, model
       />
       {view === 'monitor' ? <SystemMonitor api={api} /> : <main className="chat-main">
         <ConversationHeader
-          key={selectedConversation?.id}
+          key={`header-${selectedConversation?.id}`}
           title={selectedConversation?.title ?? 'Loading conversation'}
           onDelete={() => void deleteConversation()}
           models={models}
@@ -174,17 +213,26 @@ export function App({ api, initialConversations, initialSummaries, models, model
           disabled={isSending || isRenaming}
           onRename={(title) => void renameConversation(title)}
           onChangeModel={(modelId) => void changeModel(modelId)}
+          promptSelector={<PromptModeSelector
+            key={selectedId}
+            conversationId={selectedId}
+            modes={promptModeAvailable ? promptModes : [...promptModes, { id: promptModeId, label: 'Unavailable — choose a mode' }]}
+            selectedId={promptModeId}
+            disabled={isSending || isLoadingConversation}
+            onChange={(id) => setPromptSelections((current) => ({ ...current, [selectedId]: id }))}
+          />}
         />
-        {selectedConversation ? <MessageList messages={selectedConversation.messages} /> : <p className="conversation-loading">Loading encrypted conversation…</p>}
-        {isSending ? <p className="response-pending" role="status">The selected model is generating a response…</p> : null}
-        {error ? <p className="request-error" role="alert">{error}</p> : null}
-        <Composer disabled={isSending} onSend={sendMessage} />
+        {selectedConversation ? <ReadingPane key={selectedConversation.id} messages={selectedConversation.messages} live={live?.conversationId === selectedConversation.id ? live : null} plainIds={plainIds} onStop={() => controller.current?.abort()} onDiscard={() => { setLive(null); setError(null) }} /> : <p className="conversation-loading">Loading encrypted conversation…</p>}
+        <div className="chat-footer">
+          <div className="chat-notice">{error ? <p className="request-error" role="alert">{error}</p> : null}</div>
+          <Composer disabled={isSending || live !== null || isLoadingConversation || !promptModeAvailable} onSend={sendMessage} />
+        </div>
       </main>}
       {settingsOpen ? (
         <div className="settings-backdrop" role="presentation" onClick={() => setSettingsOpen(false)}>
           <section className="settings-panel" role="dialog" aria-modal="true" aria-labelledby="settings-title" onClick={(event) => event.stopPropagation()}>
             <div className="settings-heading"><h2 id="settings-title">Session settings</h2><button type="button" onClick={() => setSettingsOpen(false)}>Close</button></div>
-            <dl><dt>New-chat model</dt><dd>{models.find((item) => item.id === selectedModelId)?.label ?? selectedModelId}</dd><dt>Provider</dt><dd>{models.find((item) => item.id === selectedModelId)?.provider ?? 'Local or test adapter'}</dd><dt>Transcript storage</dt><dd>{modelConfiguration.storageLabel}</dd><dt>Inference mode</dt><dd>{modelConfiguration.modelBackend === 'openrouter' ? 'Privacy-restricted hosted inference' : 'Self-hosted inference'}</dd><dt>Response display</dt><dd>Shown once generation completes</dd></dl>
+            <dl><dt>New-chat model</dt><dd>{models.find((item) => item.id === selectedModelId)?.label ?? selectedModelId}</dd><dt>Provider</dt><dd>{models.find((item) => item.id === selectedModelId)?.provider ?? 'Local or test adapter'}</dd><dt>Transcript storage</dt><dd>{modelConfiguration.storageLabel}</dd><dt>Inference mode</dt><dd>{modelConfiguration.modelBackend === 'openrouter' ? 'Privacy-restricted hosted inference' : 'Self-hosted inference'}</dd><dt>Response display</dt><dd>Live streaming with manual scrolling</dd></dl>
             <label className="settings-model-label" htmlFor="settings-model">Default for new conversations</label>
             <select id="settings-model" value={models.some((item) => item.id === selectedModelId) ? selectedModelId : ''} onChange={(event) => setSelectedModelId(event.target.value)}>
               {models.map((model) => <option key={model.id} value={model.id}>{model.label}</option>)}

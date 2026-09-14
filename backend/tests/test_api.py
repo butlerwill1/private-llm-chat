@@ -49,6 +49,8 @@ def make_settings() -> Settings:
     """Use disposable in-memory storage because these API tests inject a model stub."""
 
     return Settings(
+        instructions_file=None,
+        prompt_modes_dir=None,
         model_backend=ModelBackend.SELF_HOSTED,
         enable_openrouter=False,
         storage_backend=StorageBackend.MEMORY,
@@ -144,6 +146,7 @@ async def test_model_configuration_exposes_no_local_paths_or_secrets() -> None:
         "custom_openrouter_model_allowed": False,
         "model_backend": "self_hosted",
         "storage_label": "Encrypted in-memory session",
+        "prompt_modes": [{"id": "standard", "label": "Standard"}],
     }
     assert models.json()[0]["provider"] is None
 

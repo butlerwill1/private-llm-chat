@@ -44,17 +44,23 @@ export interface ModelOption {
 }
 
 export interface ModelConfiguration {
+  readonly promptModes?: readonly PromptMode[]
   readonly customOpenRouterModelAllowed: boolean
   readonly modelBackend: 'self_hosted' | 'openrouter'
   readonly storageLabel: string
 }
 
 export interface SendMessageRequest {
+  readonly promptModeId?: string
   readonly conversationId: string
   readonly body: string
 }
 
 export interface CreateConversationRequest { readonly modelId: string }
+export interface StreamUpdate { readonly type: 'text' | 'status'; readonly text: string }
+
+export interface PromptMode { readonly id: string; readonly label: string }
+export const standardPromptModes: readonly PromptMode[] = [{ id: 'standard', label: 'Standard' }]
 
 export interface Metric { readonly value: number | string | null; readonly unit: string | null; readonly status: string; readonly detail: string | null }
 export interface LoadedModel { readonly name: string; readonly vramBytes: number | null; readonly contextLength: number | null; readonly expiresAt: string | null }
@@ -75,6 +81,7 @@ export interface ChatApi {
   renameConversation(conversationId: string, title: string): Promise<Conversation>
   changeModel(conversationId: string, modelId: string): Promise<Conversation>
   sendMessage(request: SendMessageRequest): Promise<Conversation>
+  streamMessage?(request: SendMessageRequest, signal: AbortSignal, onUpdate: (event: StreamUpdate) => void): Promise<Conversation>
   deleteConversation(conversationId: string): Promise<void>
   getSystemMonitor(): Promise<SystemMonitor>
   exportSystemMonitor(): Promise<void>

@@ -39,6 +39,7 @@ override.tf.json
 Thumbs.db
 
 # Local runtime data
+# Includes private system prompt templates in .local/prompt-modes/.
 .local/
 tmp/
 # Image Builder logs can contain AWS identifiers and are diagnostic artefacts,

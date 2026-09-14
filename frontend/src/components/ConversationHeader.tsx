@@ -1,8 +1,10 @@
 import { useState } from 'react'
+import type { ReactNode } from 'react'
 import { PrivacyDetails } from './PrivacyDetails'
 import type { ModelOption } from '../domain/chat'
 
 interface ConversationHeaderProps {
+  readonly promptSelector: ReactNode
   readonly title: string
   readonly onDelete: () => void
   readonly models: readonly ModelOption[]
@@ -12,7 +14,7 @@ interface ConversationHeaderProps {
   readonly onChangeModel: (modelId: string) => void
 }
 
-export function ConversationHeader({ title, onDelete, models, activeModelId, disabled, onRename, onChangeModel }: ConversationHeaderProps) {
+export function ConversationHeader({ title, onDelete, models, activeModelId, disabled, onRename, onChangeModel, promptSelector }: ConversationHeaderProps) {
   const [isEditingTitle, setIsEditingTitle] = useState(false)
   const [draftTitle, setDraftTitle] = useState(title)
 
@@ -48,8 +50,9 @@ export function ConversationHeader({ title, onDelete, models, activeModelId, dis
         )}
       </div>
       <div className="conversation-actions">
+        {promptSelector}
         <label className="sr-only" htmlFor="conversation-model">Conversation model</label>
-        <select id="conversation-model" className="conversation-model" value={activeModelId ?? ''} disabled={disabled} onChange={(event) => onChangeModel(event.target.value)}>
+        <select id="conversation-model" className="conversation-model" title={models.find((model) => model.id === activeModelId)?.label} value={activeModelId ?? ''} disabled={disabled} onChange={(event) => onChangeModel(event.target.value)}>
           {models.map((model) => <option key={model.id} value={model.id}>{model.label}</option>)}
         </select>
         <button className="delete-conversation" type="button" onClick={onDelete}>

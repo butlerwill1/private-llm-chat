@@ -1,9 +1,14 @@
+import asyncio
+import json
+from collections.abc import AsyncIterator
+from contextlib import suppress
 from time import perf_counter
 from typing import Annotated, cast
 from uuid import UUID
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi.responses import StreamingResponse
 
 from private_chat.adapters.telemetry import LocalSystemMonitor, TelemetryStore
 from private_chat.api.schemas import (
@@ -115,6 +120,7 @@ async def list_models(
 
 @router.get("/model-configuration", response_model=ModelConfigurationResponse)
 async def model_configuration(
+    request: Request,
     custom_model_allowed: Annotated[bool, Depends(get_custom_model_allowed)],
     model_backend: Annotated[str, Depends(get_model_backend)],
     storage_label: Annotated[str, Depends(get_storage_label)],
@@ -125,6 +131,7 @@ async def model_configuration(
         custom_openrouter_model_allowed=custom_model_allowed,
         model_backend=model_backend,
         storage_label=storage_label,
+        prompt_modes=request.app.state.prompt_modes,
     )
 
 
@@ -249,11 +256,16 @@ async def send_message(
             SendMessageCommand(
                 conversation_id=conversation_id,
                 content=body.content,
+                prompt_mode_id=body.prompt_mode_id,
             )
         )
     except KeyError as error:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found"
+        ) from error
+    except ValueError as error:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(error)
         ) from error
     except httpx.TimeoutException as error:
         # A local model can need time to generate, but a finite timeout still
@@ -291,3 +303,81 @@ async def send_message(
             }
         )
     return response
+
+
+@router.post("/conversations/{conversation_id}/messages/stream")
+async def stream_message(
+    conversation_id: UUID,
+    body: SendMessageRequest,
+    request: Request,
+    use_case: Annotated[SendMessage, Depends(get_send_message)],
+    service: Annotated[ConversationService, Depends(get_conversations)],
+    catalog: Annotated[ConfiguredModelCatalog, Depends(get_model_catalog)],
+    telemetry: Annotated[TelemetryStore, Depends(get_telemetry_store)],
+) -> StreamingResponse:
+    if await service.get(conversation_id) is None:
+        raise HTTPException(404, "Conversation not found")
+
+    async def events() -> AsyncIterator[str]:
+        # Bounded buffering applies backpressure; disconnect cancels the provider request.
+        queue: asyncio.Queue[dict[str, object]] = asyncio.Queue(maxsize=32)
+
+        async def emit(kind: str, text: str) -> None:
+            await queue.put({"type": kind, "text": text})
+
+        async def produce() -> None:
+            started = perf_counter()
+            try:
+                assistant = await use_case.execute(
+                    SendMessageCommand(conversation_id, body.content, body.prompt_mode_id), emit
+                )
+                view = await service.get(conversation_id)
+                if view is None:
+                    raise RuntimeError("Conversation disappeared")
+                result = ConversationResponse.from_view(view, catalog)
+                usage = assistant.usage
+                if usage is not None and usage.provider == "self-hosted":
+                    # Telemetry must never convert an already saved turn into a failed stream.
+                    with suppress(Exception):
+                        telemetry.record_inference({
+                            "model": usage.model,
+                            "duration_ms": round((perf_counter() - started) * 1000),
+                            "input_tokens": usage.input_tokens,
+                            "output_tokens": usage.output_tokens,
+                            "total_tokens": usage.total_tokens,
+                            "outcome": "success",
+                        })
+                await queue.put({"type": "done", "conversation": result.model_dump(mode="json")})
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                # Never expose upstream bodies, prompts or secrets in an error event.
+                await queue.put({
+                    "type": "error",
+                    "text": "Response interrupted. The answer may be incomplete; "
+                    "reload the conversation to check whether it was saved.",
+                })
+
+        task = asyncio.create_task(produce())
+        try:
+            yield json.dumps({"type": "status", "text": "Waiting for the model…"}) + "\n"
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    event = await asyncio.wait_for(queue.get(), timeout=15)
+                except TimeoutError:
+                    yield json.dumps({"type": "heartbeat"}) + "\n"
+                    continue
+                yield json.dumps(event, ensure_ascii=False) + "\n"
+                if event["type"] in {"done", "error"}:
+                    break
+        finally:
+            task.cancel()
+            with suppress(asyncio.CancelledError):
+                await task
+
+    return StreamingResponse(
+        events(), media_type="application/x-ndjson",
+        headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
+    )

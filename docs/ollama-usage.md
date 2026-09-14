@@ -155,3 +155,65 @@ ollama stop gemma3:4b
 The Private Chat **System Monitor** is intended to make the same operational
 information visible from the app while retaining only privacy-safe performance
 telemetry.
+
+## Qwen laptop and CPU presets
+
+Run the preparation script to download both models, create the presets and
+test the smaller model using a short synthetic prompt:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\prepare-qwen-laptop.ps1
+```
+
+The presets reuse the original model blobs; they do not duplicate the weights.
+
+| Preset | Base model | Execution | Configured context |
+| --- | --- | --- | --- |
+| `qwen3.5:9b-laptop` | `qwen3.5:9b` (Q4_K_M, about 6.6 GB) | Ollama automatically chooses GPU or mixed placement | 4,096 tokens |
+| `qwen3.6:27b-cpu` | `qwen3.6:27b-q4_K_M` (about 17 GB) | CPU only (`num_gpu=0`) | 4,096 tokens |
+
+```powershell
+ollama run qwen3.5:9b-laptop
+ollama ps
+nvidia-smi
+```
+
+`100% GPU` in `ollama ps` confirms full GPU placement. Other GPU applications
+or a larger context allocation can change whether the smaller model fits.
+On this RTX 5050 laptop, the preparation test on 13 September 2026 completed
+fully on GPU: Ollama reported 5.11 GiB allocated in VRAM at 4,096 tokens for
+a text-only prompt with thinking disabled. The larger CPU preset was downloaded
+and its settings verified, but it was not loaded because free system RAM was
+only about 4.8 GiB.
+The standard `qwen3.6:27b-q4_K_M` tag retains automatic placement and can use
+both CPU and GPU; the `27b-cpu` preset explicitly selects CPU execution.
+
+Before experimenting with the larger model, release any loaded smaller model
+and close memory-heavy applications. Aim for at least 22 GiB of available
+system RAM as an initial allowance for its weights, working memory and context.
+This is a practical starting point, not a guarantee; monitor memory while loading.
+The preparation script downloads the larger model but deliberately does not
+load it when existing applications already occupy most of the laptop's RAM.
+
+```powershell
+ollama stop qwen3.5:9b-laptop
+ollama run qwen3.6:27b-cpu
+ollama ps
+```
+
+The CPU preset should report `100% CPU`. Downloading a model alone consumes
+disk space; running it consumes RAM/VRAM. CPU inference can be substantially
+slower, particularly with thinking enabled.
+
+With `CHAT_ENABLE_LOCAL_OLLAMA=true`, Private Chat's model dropdown exposes
+Gemma 3 4B, Qwen 3.5 9B (local GPU, automatic placement), and Qwen 3.6 27B
+(local CPU). The Qwen choices use the prepared preset tags above, including
+their 4K context and the larger model's CPU-only setting. Changing the dropdown
+updates the conversation's active model; the next message runs that model.
+Selecting a model alone does not load its weights.
+
+The approved local list can be changed with `CHAT_LOCAL_OLLAMA_ROUTES`, a JSON
+array of objects with `model_id` and `label`. Restart the backend and refresh
+the browser after changing the catalogue. `CHAT_LOCAL_OLLAMA_MODEL_NAME` remains
+supported for an additional custom local tag. Downloading an arbitrary model
+does not automatically add it to the approved dropdown list.

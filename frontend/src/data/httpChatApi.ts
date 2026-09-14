@@ -1,4 +1,6 @@
 import type { ChatApi, ChatMessage, Conversation, ConversationSummary, CostBasis, ModelConfiguration, ModelOption, SendMessageRequest, SystemMonitor } from '../domain/chat'
+import type { StreamUpdate } from '../domain/chat'
+import { streamLines } from './streamLines'
 
 interface ApiMessage {
   readonly id: string
@@ -36,6 +38,16 @@ interface ApiConversationSummary {
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null
+
+function parsePromptModes(value: unknown): { id: string; label: string }[] {
+  if (!Array.isArray(value)) throw new Error('The chat API returned invalid prompt modes.')
+  return value.map((item: unknown) => {
+    if (!isRecord(item) || typeof item.id !== 'string' || typeof item.label !== 'string') {
+      throw new Error('The chat API returned invalid prompt modes.')
+    }
+    return { id: item.id, label: item.label }
+  })
+}
 
 function parseMessage(value: unknown): ApiMessage {
   if (!isRecord(value)
@@ -175,6 +187,7 @@ export class HttpChatApi implements ChatApi {
       customOpenRouterModelAllowed: value.custom_openrouter_model_allowed,
       modelBackend: value.model_backend,
       storageLabel: value.storage_label,
+      ...(value.prompt_modes === undefined ? {} : { promptModes: parsePromptModes(value.prompt_modes) }),
     }
   }
 
@@ -191,7 +204,7 @@ export class HttpChatApi implements ChatApi {
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content: request.body }),
+        body: JSON.stringify({ content: request.body, prompt_mode_id: request.promptModeId }),
       },
     ))
     return toDomain(parseConversation(value))
@@ -203,6 +216,25 @@ export class HttpChatApi implements ChatApi {
       { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model_id: modelId }) },
     ))
     return toDomain(parseConversation(value))
+  }
+
+  async streamMessage(request: SendMessageRequest, signal: AbortSignal, onUpdate: (event: StreamUpdate) => void): Promise<Conversation> {
+    const response = await fetch(`${this.baseUrl}/conversations/${encodeURIComponent(request.conversationId)}/messages/stream`, {
+      method: 'POST', signal, headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: request.body, prompt_mode_id: request.promptModeId }),
+    })
+    if (!response.ok) await readJson(response)
+    if (!response.body) throw new Error('This browser did not provide a response stream.')
+    for await (const line of streamLines(response.body)) {
+      const event: unknown = JSON.parse(line)
+      if (!isRecord(event)) throw new Error('Invalid response stream.')
+      if (event.type === 'done') return toDomain(parseConversation(event.conversation))
+      if (event.type === 'error') throw new Error(typeof event.text === 'string' ? event.text : 'Response interrupted.')
+      if ((event.type === 'text' || event.type === 'status') && typeof event.text === 'string') {
+        onUpdate({ type: event.type, text: event.text })
+      } else if (event.type !== 'heartbeat') throw new Error('Invalid response stream event.')
+    }
+    throw new Error('Connection ended before the answer was saved. Reload to check its status.')
   }
 
   async renameConversation(conversationId: string, title: string): Promise<Conversation> {

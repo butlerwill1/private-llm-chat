@@ -23,6 +23,7 @@ class SendMessageRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
     # Limits provide an early guard against empty input and unbounded request bodies.
     content: str = Field(min_length=1, max_length=32_000)
+    prompt_mode_id: str | None = Field(default=None, pattern=r"^[a-z0-9][a-z0-9_-]{0,79}$")
 
 
 class CreateConversationRequest(BaseModel):
@@ -56,6 +57,7 @@ class ModelConfigurationResponse(BaseModel):
     custom_openrouter_model_allowed: bool
     model_backend: str
     storage_label: str
+    prompt_modes: tuple[dict[str, str], ...]
 
 
 class TurnUsageResponse(BaseModel):

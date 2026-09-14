@@ -107,19 +107,29 @@ def create_app(
         if client is None:  # Defensive invariant for future composition changes.
             raise RuntimeError("HTTP client was not configured")
         configured_clients: dict[str, ModelClient] = {}
+        local_options: list[ModelOption] = []
         if settings.model_backend is ModelBackend.SELF_HOSTED or settings.enable_local_ollama:
             local_model = (
                 settings.model_name
                 if settings.model_backend is ModelBackend.SELF_HOSTED
                 else settings.local_ollama_model_name
             )
-            configured_clients[local_model] = SelfHostedModelClient(
+            local_options = [
+                ModelOption(route.model_id, route.label, "self_hosted")
+                for route in (settings.local_ollama_routes if settings.enable_local_ollama else ())
+            ]
+            if local_model not in {option.id for option in local_options}:
+                local_options.append(
+                    ModelOption(local_model, f"{local_model} — Self-hosted", "self_hosted")
+                )
+            local_client = SelfHostedModelClient(
                 SelfHostedConfiguration(
                     base_url=settings.self_hosted_base_url,
                     api_key=settings.self_hosted_api_key,
                 ),
                 client,
             )
+            configured_clients.update({option.id: local_client for option in local_options})
         openrouter: OpenRouterModelClient | None = None
         if settings.enable_openrouter or settings.model_backend is ModelBackend.OPENROUTER:
             if settings.openrouter_api_key is None:
@@ -142,19 +152,7 @@ def create_app(
             custom_openrouter_client=openrouter,
             allow_custom_openrouter_model=settings.allow_custom_openrouter_model,
         )
-        model_options = tuple(
-            [
-                ModelOption(
-                    settings.model_name
-                    if settings.model_backend is ModelBackend.SELF_HOSTED
-                    else settings.local_ollama_model_name,
-                    "Local GPU (Ollama)",
-                    "self_hosted",
-                )
-            ]
-            if settings.model_backend is ModelBackend.SELF_HOSTED or settings.enable_local_ollama
-            else []
-        ) + tuple(
+        model_options = tuple(local_options) + tuple(
             ModelOption(route.model_id, route.label, "openrouter", route.provider)
             for route in (settings.openrouter_routes if settings.enable_openrouter else ())
         )
@@ -193,7 +191,10 @@ def create_app(
     else:
         repository = SqliteConversationRepository(database_path, encryptor)
     catalog = ConfiguredModelCatalog(model_options)
-    instructions_provider = FileConversationInstructionsProvider(settings.instructions_file)
+    instructions_provider = FileConversationInstructionsProvider(
+        settings.instructions_file, settings.prompt_modes_dir
+    )
+    app.state.prompt_modes = instructions_provider.options()
     app.state.send_message = SendMessage(
         repository, encryptor, model_client, settings.model_name, instructions_provider
     )

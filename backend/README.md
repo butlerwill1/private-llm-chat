@@ -100,3 +100,27 @@ should implement `ModelClient` and pass the same contract rather than changing t
 2. Integration-test S3 conditional writes and KMS encryption contexts in the deployment account.
 3. Inject secrets from an AWS secrets service; do not place them in images or Terraform state.
 4. Disable or redact request-body logging in API Gateway, load balancers, tracing and error tools.
+
+## Local prompt modes
+
+The chat header's **Prompt mode** selector defaults to **Standard**. Custom modes
+are plain UTF-8 JSON files in `.local/prompt-modes/` at the repository root, which
+Git ignores. Only the Standard prompt ships in source control. Each file uses
+its filename (without `.json`) as its ID and contains `label` (display name) and
+`prompt` (system instructions). IDs use lowercase letters, digits, hyphens, or
+underscores; `standard` and `local-instructions` are reserved. Labels may have up
+to 100 characters and prompts up to 32,000 characters.
+
+Create or edit files locally, then restart the backend and refresh the browser.
+`CHAT_PROMPT_MODES_DIR` can override the directory; keep any replacement outside
+Git or add it to your own ignore rules. Existing `CHAT_INSTRUCTIONS_FILE` content
+appears separately as **Local instructions**. Older API clients that omit
+`prompt_mode_id` retain the existing instructions-file behavior.
+
+The browser remembers the selected ID separately for each conversation in local
+storage. A mode change applies on the next send, retaining conversation history;
+start a new conversation for a fresh portrayal. Clearing browser storage resets
+selections. An unavailable saved mode requires choosing another before sending.
+Prompt text is loaded by the backend, never bundled into the frontend or saved
+in transcripts. It is sent to the selected inference provider, including hosted
+providers when selected. Only IDs and labels are returned in model configuration.
