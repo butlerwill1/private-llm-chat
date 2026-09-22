@@ -12,9 +12,12 @@ from private_chat.domain.models import CostBasis, TurnUsage
 class DecryptedMessagePayload:
     content: str
     usage: TurnUsage | None
+    reasoning: str | None = None
 
 
-def encode_message_payload(content: str, usage: TurnUsage | None) -> bytes:
+def encode_message_payload(
+    content: str, usage: TurnUsage | None, reasoning: str | None = None
+) -> bytes:
     """Encode new messages before application-level encryption."""
 
     usage_record: dict[str, Any] | None = None
@@ -32,7 +35,7 @@ def encode_message_payload(content: str, usage: TurnUsage | None) -> bytes:
             "provider": usage.provider,
         }
     return json.dumps(
-        {"schema_version": 1, "content": content, "usage": usage_record},
+        {"schema_version": 1, "content": content, "usage": usage_record, "reasoning": reasoning},
         ensure_ascii=False,
         separators=(",", ":"),
     ).encode()
@@ -91,4 +94,9 @@ def decode_message_payload(plaintext: bytes) -> DecryptedMessagePayload:
     content = record.get("content")
     if not isinstance(content, str):
         raise ValueError("Invalid encrypted message payload")
-    return DecryptedMessagePayload(content=content, usage=_decode_usage(record.get("usage")))
+    reasoning = record.get("reasoning")
+    if reasoning is not None and not isinstance(reasoning, str):
+        raise ValueError("Invalid encrypted reasoning text")
+    return DecryptedMessagePayload(
+        content=content, usage=_decode_usage(record.get("usage")), reasoning=reasoning
+    )

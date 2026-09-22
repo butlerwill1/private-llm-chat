@@ -4,6 +4,7 @@ from typing import Any
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
 
+from private_chat.adapters.reasoning import reasoning_text
 from private_chat.adapters.streaming import stream_completion
 from private_chat.adapters.usage import parse_generation_usage, parse_openrouter_usage
 from private_chat.domain.models import ModelRequest, ModelResponse
@@ -42,8 +43,14 @@ class OpenRouterModelClient:
     def __init__(self, config: OpenRouterConfiguration, client: httpx.AsyncClient) -> None:
         self._config = config
         self._client = client
+        self._route_verified = True
+
+    def _require_verified_route(self) -> None:
+        if not self._route_verified:
+            raise ModelProviderError("This model's approved privacy route is unavailable")
 
     async def generate(self, request: ModelRequest) -> ModelResponse:
+        self._require_verified_route()
         payload: dict[str, Any] = {
             "model": request.model,
             "messages": [
@@ -99,11 +106,15 @@ class OpenRouterModelClient:
                     usage = parse_generation_usage(
                         generation_response.json(), model=model, provider=provider
                     )
-        return ModelResponse(content=content, model=model, provider=provider, usage=usage)
+        return ModelResponse(
+            content=content, model=model, provider=provider, usage=usage,
+            reasoning=reasoning_text(body["choices"][0]["message"]) or None,
+        )
 
     async def verify_zdr_route(self, model_id: str) -> None:
-        """Fail startup if OpenRouter no longer publishes this exact ZDR route."""
+        """Disable inference if OpenRouter no longer publishes this exact ZDR route."""
 
+        self._route_verified = False
         response = await self._client.get("https://openrouter.ai/api/v1/endpoints/zdr")
         response.raise_for_status()
         body = response.json()
@@ -122,6 +133,7 @@ class OpenRouterModelClient:
                 and entry.get("provider_name") in provider_names
                 and entry.get("status", 0) == 0
             ):
+                self._route_verified = True
                 return
         raise RuntimeError(
             "No configured OpenRouter provider currently offers a verified ZDR route for "
@@ -129,6 +141,7 @@ class OpenRouterModelClient:
         )
 
     async def stream(self, request: ModelRequest, emit: StreamCallback) -> ModelResponse:
+        self._require_verified_route()
         return await stream_completion(
             self._client, f"{self._config.base_url}/chat/completions",
             {"Authorization": f"Bearer {self._config.api_key.get_secret_value()}"},

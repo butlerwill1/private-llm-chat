@@ -1,10 +1,9 @@
 import Markdown from 'react-markdown'
-import { useState } from 'react'
+import remarkGfm from 'remark-gfm'
 import type { ChatMessage, TurnUsage } from '../domain/chat'
 
 interface MessageListProps {
   readonly messages: readonly ChatMessage[]
-  readonly plainIds?: ReadonlySet<string>
   readonly draftId?: string | undefined
 }
 
@@ -67,8 +66,24 @@ function UsageBreakdown({ usage }: { readonly usage: TurnUsage }) {
   )
 }
 
-export function MessageList({ messages, plainIds, draftId }: MessageListProps) {
-  const [formatted, setFormatted] = useState<ReadonlySet<string>>(() => new Set())
+function RenderedMarkdown({ children }: { readonly children: string }) {
+  return (
+    <Markdown
+      remarkPlugins={[remarkGfm]}
+      components={{
+        a: ({ href, children: linkChildren }) => (
+          <a href={href} target="_blank" rel="noreferrer">
+            {linkChildren}
+          </a>
+        ),
+      }}
+    >
+      {children}
+    </Markdown>
+  )
+}
+
+export function MessageList({ messages, draftId }: MessageListProps) {
   return (
     <ol className="message-list" aria-label="Conversation messages">
       {messages.map((message) => (
@@ -76,25 +91,23 @@ export function MessageList({ messages, plainIds, draftId }: MessageListProps) {
           {message.author === 'assistant' ? <div className="assistant-avatar" aria-hidden="true">AI</div> : null}
           <div className="message-content">
             {message.author === 'event' ? null : <strong>{message.author === 'assistant' ? 'Private Chat' : 'You'}</strong>}
-            {message.author === 'assistant' && plainIds?.has(message.id) && !formatted.has(message.id) ? (
-              <><div className="stream-text">{message.body}</div>{message.id === draftId ? null : <button type="button" className="format-answer" onClick={() => setFormatted((current) => new Set([...current, message.id]))}>Format answer</button>}</>
+            {message.author === 'assistant' && message.reasoning ? (
+              <details className="message-thinking">
+                <summary>Thinking</summary>
+                {message.id === draftId ? <div className="stream-text">{message.reasoning}</div> : (
+                  <div className="thinking-markdown"><RenderedMarkdown>{message.reasoning}</RenderedMarkdown></div>
+                )}
+              </details>
+            ) : null}
+            {message.author === 'assistant' && message.id === draftId ? (
+              <div className="stream-text">{message.body}</div>
             ) : message.author === 'assistant' ? (
-              <Markdown
-                components={{
-                  a: ({ href, children }) => (
-                    <a href={href} target="_blank" rel="noreferrer">
-                      {children}
-                    </a>
-                  ),
-                }}
-              >
-                {message.body}
-              </Markdown>
-            ) : <p className={plainIds?.has(message.id) ? 'stream-text' : undefined}>{message.body}</p>}
-            {message.author === 'event' || message.id === draftId || (message.author === 'user' && plainIds?.has(message.id)) ? null : <p className="message-usage" title={message.usage === null ? undefined : `${message.usage.model} via ${message.usage.provider}; cost is shared with the paired message.`}>
+              <RenderedMarkdown>{message.body}</RenderedMarkdown>
+            ) : <p className="stream-text">{message.body}</p>}
+            {message.author === 'event' || message.id === draftId ? null : <p className="message-usage" title={message.usage === null ? undefined : `${message.usage.model} via ${message.usage.provider}; cost is shared with the paired message.`}>
               {usageText(message.author, message.usage)}
             </p>}
-            {message.author === 'event' || message.usage === null || (message.author === 'user' && plainIds?.has(message.id)) ? null : <UsageBreakdown usage={message.usage} />}
+            {message.author === 'event' || message.usage === null ? null : <UsageBreakdown usage={message.usage} />}
           </div>
         </li>
       ))}

@@ -7,6 +7,7 @@ interface ApiMessage {
   readonly role: 'assistant' | 'user' | 'system'
   readonly content: string
   readonly usage: ApiTurnUsage | null
+  readonly reasoning: string | null
 }
 
 interface ApiTurnUsage {
@@ -54,10 +55,11 @@ function parseMessage(value: unknown): ApiMessage {
     || typeof value.id !== 'string'
     || (value.role !== 'assistant' && value.role !== 'user' && value.role !== 'system')
     || typeof value.content !== 'string'
+    || !(value.reasoning === undefined || value.reasoning === null || typeof value.reasoning === 'string')
     || !(value.usage === null || parseUsage(value.usage) !== null)) {
     throw new Error('The chat API returned an invalid message.')
   }
-  return { id: value.id, role: value.role, content: value.content, usage: value.usage as ApiTurnUsage | null }
+  return { id: value.id, role: value.role, content: value.content, usage: value.usage as ApiTurnUsage | null, reasoning: typeof value.reasoning === 'string' ? value.reasoning : null }
 }
 
 const isTokenCount = (value: unknown): value is number =>
@@ -106,6 +108,7 @@ const toDomain = (conversation: ApiConversation): Conversation => ({
     id: message.id,
     author: message.role === 'system' ? 'event' : message.role,
     body: message.content,
+    reasoning: message.reasoning,
     usage: message.usage === null ? null : {
       inputTokens: message.usage.input_tokens,
       outputTokens: message.usage.output_tokens,
@@ -230,7 +233,7 @@ export class HttpChatApi implements ChatApi {
       if (!isRecord(event)) throw new Error('Invalid response stream.')
       if (event.type === 'done') return toDomain(parseConversation(event.conversation))
       if (event.type === 'error') throw new Error(typeof event.text === 'string' ? event.text : 'Response interrupted.')
-      if ((event.type === 'text' || event.type === 'status') && typeof event.text === 'string') {
+      if ((event.type === 'text' || event.type === 'reasoning' || event.type === 'status') && typeof event.text === 'string') {
         onUpdate({ type: event.type, text: event.text })
       } else if (event.type !== 'heartbeat') throw new Error('Invalid response stream event.')
     }

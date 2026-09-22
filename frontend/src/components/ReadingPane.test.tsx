@@ -7,7 +7,7 @@ afterEach(cleanup)
 it('keeps manual scroll position as chunks arrive and exposes stop/follow controls', () => {
   const live: LiveTurn = { id: 'draft', conversationId: 'chat', user: 'hello', answer: 'First line', status: 'Generating…', phase: 'generating' }
   const stop = vi.fn()
-  const props = { messages: [], live, plainIds: new Set<string>(), onStop: stop, onDiscard: vi.fn() }
+  const props = { messages: [], live, onStop: stop, onDiscard: vi.fn() }
   const { container, rerender } = render(<ReadingPane {...props} />)
   const viewport = container.querySelector('.reading-viewport')!
   viewport.scrollTop = 150

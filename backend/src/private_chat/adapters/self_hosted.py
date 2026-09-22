@@ -6,6 +6,7 @@ from urllib.parse import urlparse
 import httpx
 from pydantic import BaseModel, ConfigDict, SecretStr, field_validator
 
+from private_chat.adapters.reasoning import reasoning_text
 from private_chat.adapters.streaming import stream_completion
 from private_chat.adapters.usage import parse_self_hosted_usage
 from private_chat.domain.models import ModelRequest, ModelResponse
@@ -70,6 +71,7 @@ class SelfHostedModelClient:
             model=model,
             provider="self-hosted",
             usage=parse_self_hosted_usage(body.get("usage"), model=model, provider="self-hosted"),
+            reasoning=reasoning_text(body["choices"][0]["message"]) or None,
         )
 
     async def stream(self, request: ModelRequest, emit: StreamCallback) -> ModelResponse:

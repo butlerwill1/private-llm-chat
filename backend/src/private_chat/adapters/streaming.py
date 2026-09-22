@@ -6,6 +6,7 @@ from typing import Any
 
 import httpx
 
+from private_chat.adapters.reasoning import reasoning_text
 from private_chat.domain.models import ModelResponse, TurnUsage
 from private_chat.ports.interfaces import ModelProviderError, StreamCallback
 
@@ -36,6 +37,7 @@ async def stream_completion(
     allowed_provider_names: tuple[str, ...] | None = None,
 ) -> ModelResponse:
     pieces: list[str] = []
+    reasoning_pieces: list[str] = []
     model = str(payload["model"])
     usage = None
     confirmed = allowed_provider_names is None
@@ -93,6 +95,10 @@ async def stream_completion(
                 if reasoning and not thinking:
                     thinking = True
                     await emit("status", "Thinking…")
+                exposed_reasoning = reasoning_text(delta)
+                if exposed_reasoning:
+                    reasoning_pieces.append(exposed_reasoning)
+                    await emit("reasoning", exposed_reasoning)
                 if content is not None:
                     if not isinstance(content, str):
                         raise ModelProviderError("Invalid streamed text")
@@ -102,4 +108,4 @@ async def stream_completion(
     content = "".join(pieces)
     if not done or not finished or not confirmed or not content.strip():
         raise ModelProviderError("The model stream ended before a complete answer")
-    return ModelResponse(content, model, provider, usage)
+    return ModelResponse(content, model, provider, usage, "".join(reasoning_pieces) or None)

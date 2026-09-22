@@ -62,12 +62,20 @@ def create_app(
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         try:
             if settings.openrouter_zdr_preflight:
-                await asyncio.gather(
+                results = await asyncio.gather(
                     *(
                         client.verify_zdr_route(model_id)
                         for model_id, client in openrouter_clients.items()
-                    )
+                    ),
+                    return_exceptions=True,
                 )
+                for model_id, result in zip(openrouter_clients, results, strict=True):
+                    if isinstance(result, Exception):
+                        # The adapter blocks both generation paths after failed verification.
+                        # Keep stored chats and other verified models accessible.
+                        catalog.mark_unavailable(model_id)
+                        logger.warning("Model %s unavailable: %s", model_id, result)
+                app.state.model_options = catalog.list_models()
             collector: asyncio.Task[None] | None = None
             if settings.telemetry_enabled:
 

@@ -41,6 +41,7 @@ describe('HttpChatApi', () => {
       author: 'assistant',
       body: 'Private response',
       usage: null,
+      reasoning: null,
     })
     // A relative URL keeps browser traffic on the local Vite/FastAPI origin and
     // avoids accidentally embedding an internet-facing API address in the UI.

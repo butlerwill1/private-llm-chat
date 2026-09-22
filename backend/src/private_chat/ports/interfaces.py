@@ -59,6 +59,8 @@ async def generate_with_stream(
     if isinstance(client, StreamingModelClient):
         return await client.stream(request, emit)
     response = await client.generate(request)
+    if response.reasoning:
+        await emit("reasoning", response.reasoning)
     await emit("text", response.content)
     return response
 

@@ -1,7 +1,7 @@
 """Configured model selection without exposing provider credentials to callers."""
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from private_chat.domain.models import ModelRequest, ModelResponse
 from private_chat.ports.interfaces import ModelClient, StreamCallback, generate_with_stream
@@ -28,6 +28,12 @@ class ConfiguredModelCatalog:
 
     def list_models(self) -> tuple[ModelOption, ...]:
         return tuple(self._options.values())
+
+    def mark_unavailable(self, model_id: str) -> None:
+        option = self._options[model_id]
+        self._options[model_id] = replace(
+            option, available=False, label=f"{option.label} (unavailable)"
+        )
 
     def require_model(self, model_id: str) -> ModelOption:
         try:

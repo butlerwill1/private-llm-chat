@@ -9,7 +9,8 @@ Local Ollama and OpenRouter replies now appear incrementally. The browser paints
 - **Jump to latest** moves to the end once without enabling following.
 - **Stop** cancels the browser request and closes the backend's provider stream. A partially received answer remains on screen as a draft; discard it before sending another message. Leaving the conversation or locking/reloading the app discards that in-memory draft.
 - Streamed answers remain plain text, including Markdown punctuation, even when generation finishes. **Format answer** deliberately renders Markdown when you choose, avoiding an automatic layout change while reading. Previously saved answers are rendered as Markdown when reloaded.
-- Reasoning models can show **Thinking…** before answer text arrives. Separate reasoning content is not displayed or stored.
+- Reasoning models show an expandable **Thinking** section above the answer when the provider exposes reasoning text. Expand it to read the text as it arrives. Completed thinking text is saved inside the same encrypted message payload as the answer and remains available when reopening the conversation. Earlier replies whose thinking was discarded cannot be recovered.
+- Thinking is the model's exposed text (or a provider's supplied summary). Providers that return no readable reasoning, or only encrypted reasoning data, do not show a Thinking section. Saved thinking is not included in later model prompts or performance telemetry. Interrupted thinking remains part of the unsaved draft until discarded.
 
 ## Implementation
 
@@ -21,6 +22,7 @@ The backend reads the provider's server-sent events incrementally and forwards n
 | --- | --- |
 | `status` | Waiting or thinking; contains `text` |
 | `text` | An answer fragment; contains `text` |
+| `reasoning` | A provider-exposed thinking fragment; contains `text` |
 | `heartbeat` | Keeps an otherwise idle connection active |
 | `done` | Contains the final saved `conversation` |
 | `error` | Contains a sanitized explanation; not a successful completion |

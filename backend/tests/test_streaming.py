@@ -215,14 +215,18 @@ async def test_cancelled_generation_leaves_no_turn_and_releases_busy_state(tmp_p
 
 
 @pytest.mark.asyncio
-async def test_reasoning_is_status_only_and_never_returned_as_answer() -> None:
+@pytest.mark.parametrize("field", ["reasoning", "reasoning_content", "reasoning_details"])
+async def test_reasoning_streams_separately_from_answer(field: str) -> None:
     events = []
 
     async def emit(kind: str, text: str) -> None:
         events.append((kind, text))
 
     frames = [
-        {"provider": "Azure", "choices": [{"delta": {"reasoning": "private reasoning"}}]},
+        {"provider": "Azure", "choices": [{"delta": {field: (
+            [{"type": "reasoning.text", "text": "private reasoning"}]
+            if field == "reasoning_details" else "private reasoning"
+        )}}]},
         frame("Answer", finish="stop"),
     ]
     async with httpx.AsyncClient(
@@ -234,8 +238,45 @@ async def test_reasoning_is_status_only_and_never_returned_as_answer() -> None:
             ), client
         )
         result = await adapter.stream(ModelRequest((), "test-model"), emit)
-    assert events == [("status", "Thinking…"), ("text", "Answer")]
+    assert events == [
+        ("status", "Thinking…"), ("reasoning", "private reasoning"), ("text", "Answer")
+    ]
     assert result.content == "Answer"
+    assert result.reasoning == "private reasoning"
+
+
+@pytest.mark.asyncio
+async def test_reasoning_is_saved_reloaded_and_excluded_from_next_prompt(tmp_path: Path) -> None:
+    requests = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        requests.append(json.loads(request.content))
+        frames = [
+            {"choices": [{"delta": {"reasoning": "Think 世界"}}]},
+            frame("Answer", finish="stop"),
+        ]
+        return httpx.Response(200, stream=WireStream(frames))
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as inference:
+        app = create_app(settings(tmp_path), http_client=inference)
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app), base_url="http://test"
+        ) as ui:
+            conversation = (await ui.post("/v1/conversations")).json()
+            url = f"/v1/conversations/{conversation['id']}"
+            response = await ui.post(url + "/messages/stream", json={"content": "hello"})
+            events = [json.loads(line) for line in response.text.splitlines()]
+            assert {"type": "reasoning", "text": "Think 世界"} in events
+            assert events[-1]["conversation"]["messages"][-1]["reasoning"] == "Think 世界"
+            saved = (await ui.get(url)).json()["messages"]
+            assert saved[0]["reasoning"] is None
+            assert saved[1]["reasoning"] == "Think 世界"
+            await ui.post(url + "/messages/stream", json={"content": "next"})
+            assert requests[1]["messages"] == [
+                {"role": "user", "content": "hello"},
+                {"role": "assistant", "content": "Answer"},
+                {"role": "user", "content": "next"},
+            ]
 
 
 @pytest.mark.asyncio

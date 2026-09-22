@@ -20,6 +20,7 @@ export interface ChatMessage {
   readonly author: MessageAuthor
   readonly body: string
   readonly usage: TurnUsage | null
+  readonly reasoning?: string | null
 }
 
 export interface Conversation {
@@ -57,7 +58,7 @@ export interface SendMessageRequest {
 }
 
 export interface CreateConversationRequest { readonly modelId: string }
-export interface StreamUpdate { readonly type: 'text' | 'status'; readonly text: string }
+export interface StreamUpdate { readonly type: 'text' | 'reasoning' | 'status'; readonly text: string }
 
 export interface PromptMode { readonly id: string; readonly label: string }
 export const standardPromptModes: readonly PromptMode[] = [{ id: 'standard', label: 'Standard' }]

@@ -25,7 +25,6 @@ export function App({ api, initialConversations, initialSummaries, models, model
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [isSending, setIsSending] = useState(false)
   const [live, setLive] = useState<LiveTurn | null>(null)
-  const [plainIds, setPlainIds] = useState<ReadonlySet<string>>(() => new Set())
   const controller = useRef<AbortController | null>(null)
   useEffect(() => () => controller.current?.abort(), [])
   const [isRenaming, setIsRenaming] = useState(false)
@@ -86,27 +85,35 @@ export function App({ api, initialConversations, initialSummaries, models, model
     setIsSending(true)
     setError(null)
     let buffered = ''
+    let bufferedReasoning = ''
     let frame: number | null = null
     const flush = () => {
       const text = buffered
+      const reasoning = bufferedReasoning
       buffered = ''
+      bufferedReasoning = ''
       frame = null
-      if (text) setLive((current) => current ? { ...current, answer: current.answer + text, status: 'Generating…' } : current)
+      if (text || reasoning) setLive((current) => current ? {
+        ...current,
+        answer: current.answer + text,
+        reasoning: (current.reasoning ?? '') + reasoning,
+        status: text || current.answer ? 'Generating…' : 'Thinking…',
+      } : current)
     }
     try {
       const request = { conversationId: selectedConversation.id, body, promptModeId }
       if (api.streamMessage) setLive({ id: crypto.randomUUID(), conversationId: selectedConversation.id, user: body, answer: '', status: 'Waiting for the model…', phase: 'generating' })
       const updated = api.streamMessage
         ? await api.streamMessage(request, abort.signal, (event) => {
-          if (event.type === 'text') {
-            buffered += event.text
+          if (event.type === 'text' || event.type === 'reasoning') {
+            if (event.type === 'text') buffered += event.text
+            else bufferedReasoning += event.text
             if (frame === null) frame = requestAnimationFrame(flush)
           } else setLive((current) => current ? { ...current, status: event.text } : current)
         })
         : await api.sendMessage(request)
       if (frame !== null) cancelAnimationFrame(frame)
       flush()
-      setPlainIds((current) => new Set([...current, ...updated.messages.slice(-2).map((message) => message.id)]))
       setConversations((current) => current.map((conversation) => conversation.id === updated.id ? updated : conversation))
       setLive(null)
     } catch (caught) {
@@ -222,7 +229,7 @@ export function App({ api, initialConversations, initialSummaries, models, model
             onChange={(id) => setPromptSelections((current) => ({ ...current, [selectedId]: id }))}
           />}
         />
-        {selectedConversation ? <ReadingPane key={selectedConversation.id} messages={selectedConversation.messages} live={live?.conversationId === selectedConversation.id ? live : null} plainIds={plainIds} onStop={() => controller.current?.abort()} onDiscard={() => { setLive(null); setError(null) }} /> : <p className="conversation-loading">Loading encrypted conversation…</p>}
+        {selectedConversation ? <ReadingPane key={selectedConversation.id} messages={selectedConversation.messages} live={live?.conversationId === selectedConversation.id ? live : null} onStop={() => controller.current?.abort()} onDiscard={() => { setLive(null); setError(null) }} /> : <p className="conversation-loading">Loading encrypted conversation…</p>}
         <div className="chat-footer">
           <div className="chat-notice">{error ? <p className="request-error" role="alert">{error}</p> : null}</div>
           <Composer disabled={isSending || live !== null || isLoadingConversation || !promptModeAvailable} onSend={sendMessage} />

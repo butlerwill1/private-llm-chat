@@ -106,6 +106,7 @@ class ConversationService:
                 id=record.id,
                 created_at=record.created_at,
                 usage=payload.usage,
+                reasoning=payload.reasoning,
             )
 
         # KMS is a synchronous SDK boundary, so run each decrypt outside the

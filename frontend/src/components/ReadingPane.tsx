@@ -7,6 +7,7 @@ export interface LiveTurn {
   readonly conversationId: string
   readonly user: string
   readonly answer: string
+  readonly reasoning?: string
   readonly status: string
   readonly phase: 'generating' | 'interrupted'
 }
@@ -14,22 +15,21 @@ export interface LiveTurn {
 interface ReadingPaneProps {
   readonly messages: readonly ChatMessage[]
   readonly live: LiveTurn | null
-  readonly plainIds: ReadonlySet<string>
   readonly onStop: () => void
   readonly onDiscard: () => void
 }
 
-export function ReadingPane({ messages, live, plainIds, onStop, onDiscard }: ReadingPaneProps) {
+export function ReadingPane({ messages, live, onStop, onDiscard }: ReadingPaneProps) {
   const viewport = useRef<HTMLDivElement>(null)
   const anchoredTurn = useRef<string | null>(null)
   const [follow, setFollow] = useState(false)
   const streamId = live?.id
   const answer = live?.answer
+  const reasoning = live?.reasoning
   const displayed = live ? [...messages,
     { id: `${live.id}-user`, author: 'user' as const, body: live.user, usage: null },
-    { id: live.id, author: 'assistant' as const, body: live.answer, usage: null },
+    { id: live.id, author: 'assistant' as const, body: live.answer, usage: null, reasoning: live.reasoning ?? null },
   ] : messages
-  const displayedPlainIds = live ? new Set([...plainIds, live.id, `${live.id}-user`]) : plainIds
 
   useLayoutEffect(() => {
     const pane = viewport.current
@@ -42,7 +42,7 @@ export function ReadingPane({ messages, live, plainIds, onStop, onDiscard }: Rea
       const end = pane.querySelector<HTMLElement>('[data-answer-end]')
       if (end) pane.scrollTop += end.getBoundingClientRect().bottom - pane.getBoundingClientRect().bottom + 24
     }
-  }, [streamId, answer, follow])
+  }, [streamId, answer, reasoning, follow])
 
   const jump = () => {
     const pane = viewport.current
@@ -52,7 +52,7 @@ export function ReadingPane({ messages, live, plainIds, onStop, onDiscard }: Rea
 
   return <section className="reading-pane" aria-label="Response reading area">
     <div className="reading-viewport" ref={viewport} tabIndex={0} onWheel={() => setFollow(false)} onTouchStart={() => setFollow(false)} onPointerDown={() => setFollow(false)} onKeyDown={(event) => { if (['ArrowUp', 'PageUp', 'Home'].includes(event.key)) setFollow(false) }}>
-      <MessageList messages={displayed} plainIds={displayedPlainIds} draftId={live?.id} />
+      <MessageList messages={displayed} draftId={live?.id} />
       <div data-answer-end />
       <div className="reading-spacer" aria-hidden="true" />
     </div>

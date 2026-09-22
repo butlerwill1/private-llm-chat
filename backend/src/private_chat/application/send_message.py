@@ -107,6 +107,7 @@ class SendMessage:
             assistant_message.id,
             assistant_message.created_at,
             usage,
+            response.reasoning,
         )
 
         async def stored(message: ChatMessage) -> StoredMessage:
@@ -116,7 +117,7 @@ class SendMessage:
                 role=message.role,
                 encrypted_content=await asyncio.to_thread(
                     self._encryptor.encrypt,
-                    encode_message_payload(message.content, message.usage),
+                    encode_message_payload(message.content, message.usage, message.reasoning),
                     context=message_context(command.conversation_id, message.id),
                 ),
                 created_at=message.created_at,

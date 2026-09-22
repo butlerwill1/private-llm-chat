@@ -104,6 +104,7 @@ class MessageResponse(BaseModel):
     content: str
     created_at: datetime
     usage: TurnUsageResponse | None
+    reasoning: str | None = None
 
     @classmethod
     def from_domain(
@@ -115,6 +116,7 @@ class MessageResponse(BaseModel):
             id=message.id,
             role=message.role,
             content=message.content,
+            reasoning=message.reasoning,
             created_at=message.created_at,
             usage=None
             if message.usage is None

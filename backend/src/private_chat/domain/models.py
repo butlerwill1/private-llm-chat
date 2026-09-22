@@ -133,6 +133,7 @@ class ChatMessage:
     id: UUID
     created_at: datetime
     usage: TurnUsage | None = None
+    reasoning: str | None = None
 
     @classmethod
     def create(cls, role: Role, content: str) -> "ChatMessage":
@@ -164,6 +165,7 @@ class ModelResponse:
     model: str
     provider: str
     usage: TurnUsage | None = None
+    reasoning: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

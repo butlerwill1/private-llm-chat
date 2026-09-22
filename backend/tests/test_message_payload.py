@@ -31,3 +31,13 @@ def test_legacy_raw_content_remains_readable_without_usage() -> None:
     decoded = decode_message_payload(b"Original encrypted message body")
     assert decoded.content == "Original encrypted message body"
     assert decoded.usage is None
+    assert decoded.reasoning is None
+
+
+def test_reasoning_payload_round_trip_and_older_payload() -> None:
+    decoded = decode_message_payload(encode_message_payload("Answer", None, "Thinking 世界"))
+    assert decoded.reasoning == "Thinking 世界"
+    assert decoded.content == "Answer"
+    older = decode_message_payload(b'{"schema_version":1,"content":"Answer","usage":null}')
+    assert older.content == "Answer"
+    assert older.reasoning is None
