@@ -12,6 +12,7 @@ This repository implements the engineering foundation from the [project brief](P
 - Ports-and-adapters boundaries for model inference, the approved model catalogue, private conversation instructions, encrypted persistence, key management and GPU lifecycle control.
 - An OpenRouter adapter that always supplies ZDR, denies provider data collection, disables fallbacks and requires an allowlist.
 - A private self-hosted adapter for Ollama or vLLM-compatible endpoints.
+- Local Ollama support for running approved models on the computer's GPU or CPU without contacting AWS.
 - AES-256-GCM envelope encryption for message content and user-managed conversation titles.
 - A React and TypeScript chat interface with editable conversation names, connected to the typed FastAPI conversation API.
 - Conversation-level model selection for new and active chats, with encrypted model-change timeline events.
@@ -28,6 +29,7 @@ This repository implements the engineering foundation from the [project brief](P
 
 | Mode | Where inference runs | What you pay for while using it | When to use it |
 |---|---|---|---|
+| Local Ollama | Ollama on this computer, using the GPU where the model fits or the CPU for the larger preset | No cloud inference or AWS cost; electricity and local hardware only | You want local inference on the laptop. |
 | Private GPU | Ollama on the private AWS GPU, reached through an SSM tunnel | GPU compute and temporary SSM interface endpoints | You want prompts and inference to stay in your AWS environment. |
 | Local OpenRouter (default) | A pinned ZDR OpenRouter provider over HTTPS | OpenRouter usage only; no AWS resources | You want normal hosted-model use with encrypted local storage. |
 
@@ -35,7 +37,7 @@ Both modes use the same React interface and FastAPI API. The model selector is p
 
 The hosted adapter sends only the model request and required routing controls. It deliberately does not attach OpenRouter's optional user, session, referral, title, trace or arbitrary metadata fields. This separates an OpenRouter account from the downstream provider, but does not make text that identifies its author anonymous.
 
-For a private GPU session, follow the [personal session runbook](ops/runbooks/personal-session.md). For OpenRouter-only mode, use the dedicated section in the same runbook.
+For local models, use [Run models locally on this computer](#run-models-locally-on-this-computer). For a private GPU session, follow the [personal session runbook](ops/runbooks/personal-session.md). For OpenRouter-only mode, use the dedicated section in the same runbook.
 
 ## Model selection and message provenance
 
@@ -100,11 +102,12 @@ flowchart LR
     API -->|"AES-256-GCM ciphertext"| Storage["Local SQLite database"]
     Key["Windows DPAPI current-user key"] --> Storage
     API -->|"ZDR request over TLS"| OpenRouter["Pinned OpenRouter provider"]
+    API -->|"Local loopback"| LocalOllama["Ollama on this computer"]
     API -->|"Private-GPU mode"| Tunnel["Local SSM tunnel on 127.0.0.1:11434"]
     Tunnel --> GPU["Private EC2 GPU with Ollama"]
 ```
 
-The browser never connects directly to the GPU or to OpenRouter. In private-GPU mode, the SSM tunnel makes Ollama appear locally at `127.0.0.1:11434`; FastAPI then talks to that loopback address. The GPU can be stopped between sessions without affecting stored conversations.
+The browser never connects directly to Ollama, the AWS GPU or OpenRouter. The FastAPI backend connects to local Ollama through loopback at `127.0.0.1:11434`. In private-GPU mode, an SSM tunnel makes the remote Ollama service available at the same loopback address. The AWS GPU can be stopped between sessions without affecting stored conversations.
 
 The backend uses explicit dependency inversion:
 
@@ -207,7 +210,47 @@ The interface calls the local FastAPI backend through Vite's same-origin `/v1`
 proxy. Follow the [personal session runbook](ops/runbooks/personal-session.md) to
 connect that backend to Ollama on the private GPU.
 
-Assistant responses support safe Markdown rendering for headings, lists, links and code blocks. Raw HTML is not rendered. Responses currently arrive once the model has completed generation; the interface shows a generation-in-progress message rather than streaming individual tokens.
+Assistant responses support safe Markdown rendering for headings, lists, links and code blocks. Raw HTML is not rendered. Responses stream into the interface as they are generated.
+
+### Run models locally on this computer
+
+Private Chat can use Ollama running on this computer. It remains bound to the
+loopback address and does not require AWS infrastructure. Install or verify
+Ollama and download the default small model:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\setup-local-ollama.ps1
+```
+
+For the prepared Qwen presets, download the models and create their local tags:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\prepare-qwen-laptop.ps1
+```
+
+Then add this to `backend/.env` and restart Private Chat:
+
+```text
+CHAT_ENABLE_LOCAL_OLLAMA=true
+```
+
+The model selector will offer these approved local models:
+
+| Model | How it runs | Use it when |
+|---|---|---|
+| Gemma 3 4B | Automatic GPU or mixed placement | You want the smallest local option. |
+| Qwen 3.5 9B | Automatic GPU or mixed placement, with a 4,096-token context | You want the strongest prepared laptop model. |
+| Qwen 3.6 27B | CPU only, with a 4,096-token context | You have enough system RAM and can accept slower responses. |
+
+On the RTX 5050 laptop used for this project, Qwen 3.5 9B completed a
+4,096-token text-only test fully on the GPU using about 5.11 GiB of VRAM. GPU
+availability depends on other applications and the selected context length.
+The CPU-only Qwen 3.6 27B preset needs about 22 GiB of available system RAM as
+a practical starting point.
+
+Use the local System Monitor, `ollama ps`, or `nvidia-smi` to check live model
+placement and memory use. The full [Ollama guide](docs/ollama-usage.md) explains
+installation, model management, VRAM monitoring and the local presets.
 
 ### Terraform
 
